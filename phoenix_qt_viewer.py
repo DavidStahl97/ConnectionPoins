@@ -819,6 +819,7 @@ class PhoenixMainWindow(QMainWindow):
         super().__init__()
         self.selected_points = []
         self.connection_points_file = "phoenix_connection_points.json"
+        self.current_step_file = None  # Pfad zur aktuell geladenen STEP-Datei
         
         self.initUI()
         # Lade keine Datei automatisch - User wählt sie aus
@@ -936,6 +937,7 @@ class PhoenixMainWindow(QMainWindow):
         )
         
         if file_path:
+            self.current_step_file = file_path  # Speichere den Pfad der STEP-Datei
             self.load_step_file(file_path)
             
     def load_step_file(self, step_file_path):
@@ -1033,24 +1035,40 @@ class PhoenixMainWindow(QMainWindow):
         self.statusBar().showMessage("Alle Vektoren gelöscht")
         
     def save_points(self):
-        """Speichert die Vektoren in JSON-Datei"""
+        """Speichert die Vektoren in JSON-Datei mit gleichem Namen wie STEP-Datei"""
         if not self.selected_points:
             QMessageBox.information(self, "Info", "Keine Vektoren zum Speichern vorhanden")
             return
             
-        try:
-            data = {"connection_vectors": self.selected_points}
+        if not self.current_step_file:
+            QMessageBox.warning(self, "Warnung", "Keine STEP-Datei geladen. Bitte zuerst eine STEP-Datei öffnen.")
+            return
             
-            with open(self.connection_points_file, 'w', encoding='utf-8') as f:
+        try:
+            # Bestimme JSON-Dateiname basierend auf STEP-Datei
+            step_dir = os.path.dirname(self.current_step_file)
+            step_filename = os.path.basename(self.current_step_file)
+            step_name_without_ext = os.path.splitext(step_filename)[0]
+            json_filename = f"{step_name_without_ext}.json"
+            json_filepath = os.path.join(step_dir, json_filename)
+            
+            # Erstelle JSON-Daten
+            data = {
+                "source_step_file": step_filename,
+                "connection_vectors": self.selected_points
+            }
+            
+            # Speichere JSON-Datei
+            with open(json_filepath, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
                 
             QMessageBox.information(
                 self, "Gespeichert", 
                 f"{len(self.selected_points)} Anschlussvektoren wurden in "
-                f"'{self.connection_points_file}' gespeichert"
+                f"'{json_filepath}' gespeichert"
             )
             
-            self.statusBar().showMessage(f"{len(self.selected_points)} Vektoren gespeichert")
+            self.statusBar().showMessage(f"{len(self.selected_points)} Vektoren in {json_filename} gespeichert")
             
         except Exception as e:
             QMessageBox.critical(self, "Fehler", f"Fehler beim Speichern:\n{str(e)}")
