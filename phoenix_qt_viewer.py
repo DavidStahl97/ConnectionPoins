@@ -939,6 +939,8 @@ class PhoenixMainWindow(QMainWindow):
         if file_path:
             self.current_step_file = file_path  # Speichere den Pfad der STEP-Datei
             self.load_step_file(file_path)
+            # Nach dem Laden der STEP-Datei, prüfe auf entsprechende JSON-Datei
+            self.auto_load_json_if_exists()
             
     def load_step_file(self, step_file_path):
         """Lädt die STEP-Datei und konvertiert sie"""
@@ -997,6 +999,76 @@ class PhoenixMainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Fehler", f"Fehler beim Laden der STEP-Datei:\n{str(e)}")
             self.statusBar().showMessage("Fehler beim Laden der Datei")
+            
+    def auto_load_json_if_exists(self):
+        """Lädt automatisch JSON-Vektoren wenn entsprechende Datei existiert"""
+        if not self.current_step_file:
+            return
+            
+        # Bestimme JSON-Dateiname basierend auf STEP-Datei
+        step_dir = os.path.dirname(self.current_step_file)
+        step_filename = os.path.basename(self.current_step_file)
+        step_name_without_ext = os.path.splitext(step_filename)[0]
+        json_filename = f"{step_name_without_ext}.json"
+        json_filepath = os.path.join(step_dir, json_filename)
+        
+        # Prüfe ob JSON-Datei existiert
+        if os.path.exists(json_filepath):
+            try:
+                self.load_json_vectors(json_filepath)
+                self.statusBar().showMessage(f"Vektoren aus {json_filename} automatisch geladen")
+            except Exception as e:
+                print(f"Fehler beim automatischen Laden der JSON-Datei: {e}")
+                self.statusBar().showMessage(f"Warnung: Fehler beim Laden von {json_filename}")
+        else:
+            print(f"Keine entsprechende JSON-Datei gefunden: {json_filepath}")
+            
+    def load_json_vectors(self, json_filepath):
+        """Lädt Vektoren aus JSON-Datei"""
+        with open(json_filepath, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            
+        # Lösche alte Vektoren
+        self.clear_points()
+        
+        # Lade Vektoren
+        if 'connection_vectors' in data:
+            vectors = data['connection_vectors']
+            
+            for vector_data in vectors:
+                # Erstelle Vektor-Objekt für den Viewer
+                viewer_vector = {
+                    'start_point': [
+                        vector_data['position']['x'],
+                        vector_data['position']['y'], 
+                        vector_data['position']['z']
+                    ],
+                    'direction': [
+                        vector_data['direction']['x'],
+                        vector_data['direction']['y'],
+                        vector_data['direction']['z']
+                    ]
+                }
+                
+                # Füge zum Viewer hinzu
+                self.viewer.selected_vectors.append(viewer_vector)
+                
+                # Füge zu selected_points hinzu (für das Speichern)
+                self.selected_points.append(vector_data)
+                
+                # Füge zur UI-Liste hinzu
+                pos = vector_data['position']
+                dir_vec = vector_data['direction']
+                self.points_list.addItem(
+                    f"Vektor {vector_data['id']}: "
+                    f"[{pos['x']:.4f}, {pos['y']:.4f}, {pos['z']:.4f}] → "
+                    f"[{dir_vec['x']:.3f}, {dir_vec['y']:.3f}, {dir_vec['z']:.3f}]"
+                )
+            
+            # Aktualisiere die Anzeige
+            self.viewer.update()
+            
+            print(f"Automatisch {len(vectors)} Vektoren aus JSON geladen")
             
     def fit_object_to_view(self):
         """Passt das aktuelle Objekt optimal ins Fenster"""
