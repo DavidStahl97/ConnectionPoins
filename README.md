@@ -1,6 +1,6 @@
-# Phoenix QT Viewer - ConnectionPoints
+# STEP 3D Viewer - Connection Points
 
-Der **phoenix_qt_viewer** ist eine PyQt6-basierte 3D-Viewer-Anwendung für Phoenix Contact Terminals mit folgenden Hauptfunktionen:
+Der **step_3d_viewer** ist eine PyQt6-basierte 3D-Viewer-Anwendung für STEP-Dateien mit folgenden Hauptfunktionen:
 
 ## 🔧 Kernfunktionalitäten
 - **STEP-Datei Import**: Lädt und visualisiert 3D-CAD-Modelle (*.stp, *.step)
@@ -31,7 +31,7 @@ Der **phoenix_qt_viewer** ist eine PyQt6-basierte 3D-Viewer-Anwendung für Phoen
 ```
 
 ## 🚀 Verwendung
-Die Anwendung ermöglicht es Ingenieuren, 3D-Terminalmodelle zu laden und präzise Anschlusspunkte mit zugehörigen Richtungsvektoren interaktiv zu definieren.
+Die Anwendung ermöglicht es Ingenieuren, 3D-Modelle aus STEP-Dateien zu laden und präzise Anschlusspunkte mit zugehörigen Richtungsvektoren interaktiv zu definieren.
 
 ## 🔧 Setup
 ```bash
@@ -56,7 +56,7 @@ pip install -r requirements.txt
 venv\Scripts\activate
 
 # Programm starten
-python phoenix_qt_viewer.py
+python step_3d_viewer.py
 ```
 
 ### Voraussetzungen

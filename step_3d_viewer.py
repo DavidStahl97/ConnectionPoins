@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-PyQt6 3D Viewer für Phoenix Contact Terminal mit Punktauswahl
+PyQt6 3D Viewer für STEP-Dateien mit Anschlussvektorauswahl
 """
 
 import sys
@@ -19,8 +19,8 @@ from OpenGL.GL import *
 from OpenGL.arrays import vbo
 import math
 
-class Phoenix3DViewer(QOpenGLWidget):
-    """OpenGL 3D-Viewer für Phoenix Contact Terminal"""
+class STEP3DViewer(QOpenGLWidget):
+    """OpenGL 3D-Viewer für STEP-Dateien"""
     
     pointSelected = pyqtSignal(float, float, float)
     
@@ -201,7 +201,7 @@ class Phoenix3DViewer(QOpenGLWidget):
         glNewList(self.display_list, GL_COMPILE)
         
         glEnable(GL_LIGHTING)
-        glColor3f(0.7, 0.7, 0.7)  # Phoenix Contact Grau
+        glColor3f(0.7, 0.7, 0.7)  # Standard Grau
         
         # Verwende Vertex Arrays für bessere Performance
         flat_vertices = []
@@ -812,13 +812,13 @@ class Phoenix3DViewer(QOpenGLWidget):
         self.camera_rotation_y = 45
         self.update()
 
-class PhoenixMainWindow(QMainWindow):
-    """Hauptfenster der Phoenix Contact Anwendung"""
+class STEP3DMainWindow(QMainWindow):
+    """Hauptfenster der STEP 3D Viewer Anwendung"""
     
     def __init__(self):
         super().__init__()
         self.selected_points = []
-        self.connection_points_file = "phoenix_connection_points.json"
+        self.connection_points_file = "step_connection_points.json"
         self.current_step_file = None  # Pfad zur aktuell geladenen STEP-Datei
         
         self.initUI()
@@ -826,7 +826,7 @@ class PhoenixMainWindow(QMainWindow):
         
     def initUI(self):
         """Initialisiert die Benutzeroberfläche"""
-        self.setWindowTitle("Phoenix Contact PTI Terminal - Anschlusspunkt-Auswahl")
+        self.setWindowTitle("STEP 3D Viewer - Anschlusspunkt-Auswahl")
         self.setGeometry(100, 100, 1200, 800)
         
         # Zentrales Widget
@@ -837,7 +837,7 @@ class PhoenixMainWindow(QMainWindow):
         main_layout = QHBoxLayout(central_widget)
         
         # 3D-Viewer
-        self.viewer = Phoenix3DViewer()
+        self.viewer = STEP3DViewer()
         self.viewer.pointSelected.connect(self.on_point_selected)
         main_layout.addWidget(self.viewer, stretch=3)
         
@@ -1164,7 +1164,7 @@ def main():
     # Anwendungsstil setzen
     app.setStyle('Fusion')  # Moderner Look
     
-    window = PhoenixMainWindow()
+    window = STEP3DMainWindow()
     window.show()
     
     return app.exec()
