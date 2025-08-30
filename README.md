@@ -33,13 +33,33 @@ Der **phoenix_qt_viewer** ist eine PyQt6-basierte 3D-Viewer-Anwendung für Phoen
 ## 🚀 Verwendung
 Die Anwendung ermöglicht es Ingenieuren, 3D-Terminalmodelle zu laden und präzise Anschlusspunkte mit zugehörigen Richtungsvektoren interaktiv zu definieren.
 
+## 🔧 Setup
+```bash
+# Repository klonen
+git clone https://github.com/DavidStahl97/ConnectionPoins.git
+cd ConnectionPoins
+
+# Virtuelles Environment erstellen
+python -m venv venv
+
+# Environment aktivieren (Windows)
+venv\Scripts\activate
+# oder auf Linux/Mac: source venv/bin/activate
+
+# Dependencies installieren
+pip install -r requirements.txt
+```
+
 ## 💻 Ausführung
 ```bash
+# Environment aktivieren (falls noch nicht aktiviert)
+venv\Scripts\activate
+
 # Programm starten
-cd ConnectionPoins
-./venv/Scripts/python phoenix_qt_viewer.py
+python phoenix_qt_viewer.py
 ```
 
 ### Voraussetzungen
-- Python 3.x mit aktiviertem virtuellen Environment
-- Erforderliche Pakete: PyQt6, OpenGL, trimesh, open3d, numpy
+- Python 3.8 oder höher
+- Windows, Linux oder macOS
+- OpenGL-fähige Grafikkarte
