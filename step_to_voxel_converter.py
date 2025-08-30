@@ -164,43 +164,35 @@ def voxels_to_depth_image(voxel_grid, direction='z'):
         x_min, x_max = x_coords.min(), x_coords.max()
         y_min, y_max = y_coords.min(), y_coords.max()
         
-        # Berechne optimale Auflösung basierend auf Voxel-Dichte
+        # Verwende Voxel-Auflösung direkt - jeder Voxel wird ein Pixel
         voxel_size = voxel_grid.voxel_size
         x_range = x_max - x_min
         y_range = y_max - y_min
         
-        # Resolution sollte etwa 2-3x die Voxel-Resolution sein für vollständiges Bild
-        resolution_x = max(50, int(x_range / voxel_size * 2))
-        resolution_y = max(50, int(y_range / voxel_size * 2))
+        # Auflösung entspricht der Anzahl der einzigartigen Voxel-Positionen
+        resolution_x = int(np.ceil(x_range / voxel_size)) + 1
+        resolution_y = int(np.ceil(y_range / voxel_size)) + 1
         
-        # Begrenze maximale Auflösung für Performance
-        resolution_x = min(resolution_x, 300)
-        resolution_y = min(resolution_y, 300)
+        print(f"Tiefenbild-Auflösung: {resolution_x} x {resolution_y} (1 Pixel = 1 Voxel)")
         
-        print(f"Tiefenbild-Auflösung: {resolution_x} x {resolution_y}")
+        # Erstelle Tiefenbild mit exakter Voxel-Zuordnung
+        depth_image = np.full((resolution_y, resolution_x), np.nan)
         
-        # Erstelle 2D-Grid mit größeren "Pixeln" 
-        x_bins = np.linspace(x_min, x_max, resolution_x)
-        y_bins = np.linspace(y_min, y_max, resolution_y)
-        
-        # Erstelle leeres Tiefenbild 
-        depth_image = np.full((resolution_y-1, resolution_x-1), np.nan)
-        
-        # Fülle das Tiefenbild - nur direkte Voxel-Zuordnung für spärliche Punkte
+        # Konvertiere jeder Voxel-Position zu Pixel-Koordinaten
         for i in range(len(voxel_coords)):
-            x_center = x_coords[i]
-            y_center = y_coords[i]
+            x_pos = x_coords[i]
+            y_pos = y_coords[i]
             depth_value = depth_coords[i]
             
-            # Finde das entsprechende Pixel (nur ein Pixel pro Voxel)
-            x_idx = np.digitize(x_center, x_bins) - 1
-            y_idx = np.digitize(y_center, y_bins) - 1
+            # Berechne Pixel-Koordinaten direkt aus Voxel-Position
+            x_idx = int(round((x_pos - x_min) / voxel_size))
+            y_idx = int(round((y_pos - y_min) / voxel_size))
             
             # Prüfe Grenzen
-            if 0 <= x_idx < resolution_x-1 and 0 <= y_idx < resolution_y-1:
+            if 0 <= x_idx < resolution_x and 0 <= y_idx < resolution_y:
                 current_depth = depth_image[y_idx, x_idx]
                 
-                # Speichere maximale Tiefe (am weitesten vom Betrachter entfernt)
+                # Speichere maximale Tiefe (am weitesten vom Betrachter entfernt)  
                 if np.isnan(current_depth) or depth_value > current_depth:
                     depth_image[y_idx, x_idx] = depth_value
         
