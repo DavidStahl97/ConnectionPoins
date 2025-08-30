@@ -28,8 +28,8 @@ class Phoenix3DViewer(QOpenGLWidget):
         super().__init__()
         self.mesh_vertices = None
         self.mesh_faces = None
-        self.selected_points = []
-        self.point_markers = []
+        self.selected_vectors = []
+        self.vector_markers = []
         
         # Kamera-Parameter
         self.camera_distance = 0.1
@@ -175,8 +175,8 @@ class Phoenix3DViewer(QOpenGLWidget):
         # Zeichne Mesh mit Display List für bessere Performance
         self.draw_mesh_optimized()
         
-        # Zeichne ausgewählte Punkte
-        self.draw_points()
+        # Zeichne ausgewählte Vektoren als Pfeile
+        self.draw_vectors()
         
     def create_display_list(self):
         """Erstellt eine Display List für optimiertes Rendering"""
@@ -236,18 +236,131 @@ class Phoenix3DViewer(QOpenGLWidget):
         if self.display_list is not None:
             glCallList(self.display_list)
         
-    def draw_points(self):
-        """Zeichnet die ausgewählten Punkte"""
+    def draw_vectors(self):
+        """Zeichnet die ausgewählten Vektoren als Würfel"""
+        if not self.selected_vectors:
+            return
+            
         glDisable(GL_LIGHTING)
-        glPointSize(10.0)
         
-        glBegin(GL_POINTS)
-        for i, point in enumerate(self.selected_points):
-            glColor3f(1.0, 0.0, 0.0)  # Rot
-            glVertex3f(point[0], point[1], point[2])
-        glEnd()
+        for i, vector_data in enumerate(self.selected_vectors):
+            start_point = vector_data['start_point']
+            
+            # Zeichne einen kleinen Würfel am Startpunkt
+            self.draw_cube(start_point, 0.02)  # Würfel mit 2cm Kantenlänge
         
         glEnable(GL_LIGHTING)
+        
+    def draw_cube(self, center, size):
+        """Zeichnet einen Würfel an der gegebenen Position"""
+        half_size = size / 2
+        x, y, z = center
+        
+        glColor3f(1.0, 0.0, 0.0)  # Rot
+        
+        # Würfel mit 6 Flächen
+        glBegin(GL_QUADS)
+        
+        # Front face
+        glVertex3f(x - half_size, y - half_size, z + half_size)
+        glVertex3f(x + half_size, y - half_size, z + half_size)
+        glVertex3f(x + half_size, y + half_size, z + half_size)
+        glVertex3f(x - half_size, y + half_size, z + half_size)
+        
+        # Back face
+        glVertex3f(x - half_size, y - half_size, z - half_size)
+        glVertex3f(x - half_size, y + half_size, z - half_size)
+        glVertex3f(x + half_size, y + half_size, z - half_size)
+        glVertex3f(x + half_size, y - half_size, z - half_size)
+        
+        # Top face
+        glVertex3f(x - half_size, y + half_size, z - half_size)
+        glVertex3f(x - half_size, y + half_size, z + half_size)
+        glVertex3f(x + half_size, y + half_size, z + half_size)
+        glVertex3f(x + half_size, y + half_size, z - half_size)
+        
+        # Bottom face
+        glVertex3f(x - half_size, y - half_size, z - half_size)
+        glVertex3f(x + half_size, y - half_size, z - half_size)
+        glVertex3f(x + half_size, y - half_size, z + half_size)
+        glVertex3f(x - half_size, y - half_size, z + half_size)
+        
+        # Right face
+        glVertex3f(x + half_size, y - half_size, z - half_size)
+        glVertex3f(x + half_size, y + half_size, z - half_size)
+        glVertex3f(x + half_size, y + half_size, z + half_size)
+        glVertex3f(x + half_size, y - half_size, z + half_size)
+        
+        # Left face
+        glVertex3f(x - half_size, y - half_size, z - half_size)
+        glVertex3f(x - half_size, y - half_size, z + half_size)
+        glVertex3f(x - half_size, y + half_size, z + half_size)
+        glVertex3f(x - half_size, y + half_size, z - half_size)
+        
+        glEnd()
+        
+    def draw_arrow_head(self, start_point, end_point, direction):
+        """Zeichnet eine Pfeilspitze"""
+        import math
+        
+        # Pfeilspitze Parameter
+        head_length = 0.02
+        head_width = 0.01
+        
+        # Berechne senkrechte Vektoren für Pfeilspitze
+        # Verwende Cross-Product mit einem beliebigen Vektor
+        if abs(direction[1]) < 0.9:
+            perpendicular1 = [
+                direction[1] * 0 - direction[2] * 1,
+                direction[2] * 1 - direction[0] * 0,
+                direction[0] * 1 - direction[1] * 0
+            ]
+        else:
+            perpendicular1 = [
+                direction[1] * 1 - direction[2] * 0,
+                direction[2] * 0 - direction[0] * 1,
+                direction[0] * 0 - direction[1] * 1
+            ]
+        
+        # Normalisiere
+        length = math.sqrt(sum(x*x for x in perpendicular1))
+        if length > 0:
+            perpendicular1 = [x/length for x in perpendicular1]
+        
+        # Zweiter senkrechter Vektor
+        perpendicular2 = [
+            direction[1] * perpendicular1[2] - direction[2] * perpendicular1[1],
+            direction[2] * perpendicular1[0] - direction[0] * perpendicular1[2],
+            direction[0] * perpendicular1[1] - direction[1] * perpendicular1[0]
+        ]
+        
+        # Rückwärts-Punkt für Pfeilspitze
+        back_point = [
+            end_point[0] - direction[0] * head_length,
+            end_point[1] - direction[1] * head_length,
+            end_point[2] - direction[2] * head_length
+        ]
+        
+        # Pfeilspitze Eckpunkte
+        tip_points = []
+        for angle in [0, 120, 240]:  # 3 Ecken
+            rad = math.radians(angle)
+            cos_a, sin_a = math.cos(rad), math.sin(rad)
+            
+            tip_point = [
+                back_point[0] + (perpendicular1[0] * cos_a + perpendicular2[0] * sin_a) * head_width,
+                back_point[1] + (perpendicular1[1] * cos_a + perpendicular2[1] * sin_a) * head_width,
+                back_point[2] + (perpendicular1[2] * cos_a + perpendicular2[2] * sin_a) * head_width
+            ]
+            tip_points.append(tip_point)
+        
+        # Zeichne Pfeilspitze als Linien
+        glColor3f(1.0, 0.0, 0.0)  # Rot
+        glBegin(GL_LINES)
+        for tip_point in tip_points:
+            glVertex3f(end_point[0], end_point[1], end_point[2])
+            glVertex3f(tip_point[0], tip_point[1], tip_point[2])
+        glEnd()
         
     def mousePressEvent(self, event):
         """Behandelt Mausklicks"""
@@ -255,7 +368,16 @@ class Phoenix3DViewer(QOpenGLWidget):
             # Konvertiere 2D-Mausposition zu 3D-Punkt
             point = self.mouse_to_3d(event.position().x(), event.position().y())
             if point is not None:
-                self.selected_points.append(point)
+                # Berechne Kamera-Richtungsvektor
+                camera_direction = self.get_camera_direction()
+                
+                # Erstelle Vektor-Objekt
+                vector_data = {
+                    'start_point': point,
+                    'direction': camera_direction
+                }
+                
+                self.selected_vectors.append(vector_data)
                 self.pointSelected.emit(point[0], point[1], point[2])
                 self.update()
         
@@ -315,14 +437,37 @@ class Phoenix3DViewer(QOpenGLWidget):
         
         return [x_rot, point_y, z_rot]
         
+    def get_camera_direction(self):
+        """Berechnet die normalisierte Richtung von der Kamera zum Objekt"""
+        import math
+        
+        # Konvertiere Rotation zu Radianten
+        rad_x = math.radians(self.camera_rotation_x)
+        rad_y = math.radians(self.camera_rotation_y)
+        
+        # Berechne Kamera-Richtungsvektor (invertiert da wir zur Kamera zeigen wollen)
+        # Standard OpenGL Kamera blickt in negative Z-Richtung
+        direction_x = math.sin(rad_y) * math.cos(rad_x)
+        direction_y = math.sin(rad_x)
+        direction_z = math.cos(rad_y) * math.cos(rad_x)
+        
+        # Normalisiere den Vektor
+        length = math.sqrt(direction_x**2 + direction_y**2 + direction_z**2)
+        if length > 0:
+            direction_x /= length
+            direction_y /= length
+            direction_z /= length
+        
+        return [direction_x, direction_y, direction_z]
+        
     def clear_points(self):
-        """Löscht alle ausgewählten Punkte"""
-        self.selected_points.clear()
+        """Löscht alle ausgewählten Vektoren"""
+        self.selected_vectors.clear()
         self.update()
         
     def get_points(self):
-        """Gibt alle ausgewählten Punkte zurück"""
-        return self.selected_points.copy()
+        """Gibt alle ausgewählten Vektoren zurück"""
+        return self.selected_vectors.copy()
         
     def keyPressEvent(self, event):
         """Behandelt Tastatureingaben für Zoom"""
@@ -397,7 +542,7 @@ class PhoenixMainWindow(QMainWindow):
         sidebar_layout.addWidget(file_btn)
         
         # Titel
-        title_label = QLabel("Anschlusspunkte")
+        title_label = QLabel("Anschlussvektoren")
         title_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
         sidebar_layout.addWidget(title_label)
         
@@ -436,19 +581,19 @@ class PhoenixMainWindow(QMainWindow):
         btn_clear.clicked.connect(self.clear_points)
         sidebar_layout.addWidget(btn_clear)
         
-        btn_save = QPushButton("Punkte speichern")
+        btn_save = QPushButton("Vektoren speichern")
         btn_save.clicked.connect(self.save_points)
         sidebar_layout.addWidget(btn_save)
         
         # Anleitung
         help_label = QLabel(
             "BEDIENUNG:\n\n"
-            "• Linksklick: Punkt setzen\n"
+            "• Linksklick: Vektor setzen\n"
             "• Rechte Maus + Ziehen: Drehen\n"
             "• 🔍+/🔍-: Zoomen\n"
             "• 🎯: Ansicht zurücksetzen\n"
             "• 📐: Objekt anpassen\n\n"
-            "Punkte werden automatisch\nnummeriert (1, 2, 3, ...)"
+            "Vektoren zeigen zur Kamera\nund werden nummeriert (1, 2, 3, ...)"
         )
         help_label.setStyleSheet("QLabel { background-color: #f0f0f0; padding: 10px; border-radius: 5px; }")
         sidebar_layout.addWidget(help_label)
@@ -538,46 +683,53 @@ class PhoenixMainWindow(QMainWindow):
             self.statusBar().showMessage("Objekt an Fenster angepasst")
             
     def on_point_selected(self, x, y, z):
-        """Wird aufgerufen wenn ein Punkt ausgewählt wurde"""
-        point_id = len(self.selected_points) + 1
-        point_data = {
-            "id": point_id,
-            "position": {"x": float(x), "y": float(y), "z": float(z)}
-        }
+        """Wird aufgerufen wenn ein Vektor ausgewählt wurde"""
+        vector_id = len(self.selected_points) + 1
         
-        self.selected_points.append(point_data)
-        
-        # Füge zur Liste hinzu
-        self.points_list.addItem(f"Punkt {point_id}: [{x:.4f}, {y:.4f}, {z:.4f}]")
-        
-        self.statusBar().showMessage(f"Punkt {point_id} hinzugefügt - {len(self.selected_points)} Punkte total")
+        # Hole den letzten ausgewählten Vektor vom Viewer
+        if self.viewer.selected_vectors:
+            last_vector = self.viewer.selected_vectors[-1]
+            direction = last_vector['direction']
+            
+            vector_data = {
+                "id": vector_id,
+                "position": {"x": float(x), "y": float(y), "z": float(z)},
+                "direction": {"x": float(direction[0]), "y": float(direction[1]), "z": float(direction[2])}
+            }
+            
+            self.selected_points.append(vector_data)
+            
+            # Füge zur Liste hinzu
+            self.points_list.addItem(f"Vektor {vector_id}: [{x:.4f}, {y:.4f}, {z:.4f}] → [{direction[0]:.3f}, {direction[1]:.3f}, {direction[2]:.3f}]")
+            
+            self.statusBar().showMessage(f"Vektor {vector_id} hinzugefügt - {len(self.selected_points)} Vektoren total")
         
     def clear_points(self):
-        """Löscht alle Punkte"""
+        """Löscht alle Vektoren"""
         self.selected_points.clear()
         self.points_list.clear()
         self.viewer.clear_points()
-        self.statusBar().showMessage("Alle Punkte gelöscht")
+        self.statusBar().showMessage("Alle Vektoren gelöscht")
         
     def save_points(self):
-        """Speichert die Punkte in JSON-Datei"""
+        """Speichert die Vektoren in JSON-Datei"""
         if not self.selected_points:
-            QMessageBox.information(self, "Info", "Keine Punkte zum Speichern vorhanden")
+            QMessageBox.information(self, "Info", "Keine Vektoren zum Speichern vorhanden")
             return
             
         try:
-            data = {"connection_points": self.selected_points}
+            data = {"connection_vectors": self.selected_points}
             
             with open(self.connection_points_file, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
                 
             QMessageBox.information(
                 self, "Gespeichert", 
-                f"{len(self.selected_points)} Anschlusspunkte wurden in "
+                f"{len(self.selected_points)} Anschlussvektoren wurden in "
                 f"'{self.connection_points_file}' gespeichert"
             )
             
-            self.statusBar().showMessage(f"{len(self.selected_points)} Punkte gespeichert")
+            self.statusBar().showMessage(f"{len(self.selected_points)} Vektoren gespeichert")
             
         except Exception as e:
             QMessageBox.critical(self, "Fehler", f"Fehler beim Speichern:\n{str(e)}")
