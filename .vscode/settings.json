@@ -1,0 +1,13 @@
+{
+    "python.defaultInterpreterPath": "./venv/Scripts/python.exe",
+    "python.terminal.activateEnvironment": true,
+    "jupyter.interactiveWindow.creationMode": "perFile",
+    "jupyter.sendSelectionToInteractiveWindow": true,
+    "python.dataScience.enableCellCodeLens": true,
+    "python.dataScience.alwaysTrustNotebooks": true,
+    "files.associations": {
+        "*.py": "python"
+    },
+    "editor.formatOnSave": true,
+    "python.formatting.provider": "black"
+}
