@@ -11,7 +11,7 @@ import trimesh
 import open3d as o3d
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, 
                              QHBoxLayout, QWidget, QPushButton, QLabel, 
-                             QListWidget, QMessageBox, QStatusBar, QFileDialog)
+                             QListWidget, QMessageBox, QStatusBar, QFileDialog, QCheckBox)
 from PyQt6.QtOpenGLWidgets import QOpenGLWidget
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QPixmap, QAction
@@ -30,6 +30,9 @@ class Phoenix3DViewer(QOpenGLWidget):
         self.mesh_faces = None
         self.selected_vectors = []
         self.vector_markers = []
+        self.show_mesh = True
+        self.show_coordinate_system = True  # Zeige Weltkoordinatensystem
+        self.original_vertices = None  # Backup der ursprünglichen Vertices
         
         # Kamera-Parameter
         self.camera_distance = 0.1
@@ -52,6 +55,7 @@ class Phoenix3DViewer(QOpenGLWidget):
         
     def load_mesh_data(self, vertices, faces):
         """Lädt Mesh-Daten in den Viewer"""
+        self.original_vertices = np.array(vertices, dtype=np.float32)  # Backup der ursprünglichen Vertices
         self.mesh_vertices = np.array(vertices, dtype=np.float32)
         self.mesh_faces = np.array(faces, dtype=np.uint32)
         
@@ -85,6 +89,9 @@ class Phoenix3DViewer(QOpenGLWidget):
         if max_dimension > 0:
             # Skaliere auf Größe 1.0
             self.mesh_vertices = (self.mesh_vertices - center) / max_dimension
+            # Speichere Transformationsparameter für Ray-Casting
+            self.mesh_center = center
+            self.mesh_scale = max_dimension
             
         # Setze optimale Kamera-Distanz
         # Basierend auf Frustum-Einstellungen (0.1 bis 10.0)
@@ -172,11 +179,16 @@ class Phoenix3DViewer(QOpenGLWidget):
         glRotatef(self.camera_rotation_x, 1, 0, 0)
         glRotatef(self.camera_rotation_y, 0, 1, 0)
         
-        # Zeichne Mesh mit Display List für bessere Performance
-        self.draw_mesh_optimized()
+        # Zeichne Mesh nur wenn aktiviert
+        if self.show_mesh:
+            self.draw_mesh_optimized()
         
         # Zeichne ausgewählte Vektoren als Pfeile
         self.draw_vectors()
+        
+        # Zeichne Weltkoordinatensystem
+        if self.show_coordinate_system:
+            self.draw_world_coordinate_system()
         
     def create_display_list(self):
         """Erstellt eine Display List für optimiertes Rendering"""
@@ -237,7 +249,7 @@ class Phoenix3DViewer(QOpenGLWidget):
             glCallList(self.display_list)
         
     def draw_vectors(self):
-        """Zeichnet die ausgewählten Vektoren als Würfel"""
+        """Zeichnet die ausgewählten Vektoren als Pfeile"""
         if not self.selected_vectors:
             return
             
@@ -245,9 +257,25 @@ class Phoenix3DViewer(QOpenGLWidget):
         
         for i, vector_data in enumerate(self.selected_vectors):
             start_point = vector_data['start_point']
+            direction = vector_data['direction']
             
-            # Zeichne einen kleinen Würfel am Startpunkt
-            self.draw_cube(start_point, 0.02)  # Würfel mit 2cm Kantenlänge
+            # Transformiere Punkt in normalisierte Koordinaten für das Rendering
+            if hasattr(self, 'mesh_center') and hasattr(self, 'mesh_scale'):
+                normalized_start = [(start_point[j] - self.mesh_center[j]) / self.mesh_scale for j in range(3)]
+                arrow_length = 0.1  # Pfeillänge in normalisierten Koordinaten
+            else:
+                normalized_start = start_point
+                arrow_length = 0.1
+            
+            # Berechne Endpunkt des Pfeils
+            normalized_end = [
+                normalized_start[0] + direction[0] * arrow_length,
+                normalized_start[1] + direction[1] * arrow_length, 
+                normalized_start[2] + direction[2] * arrow_length
+            ]
+            
+            # Zeichne Pfeil
+            self.draw_arrow(normalized_start, normalized_end, direction)
         
         glEnable(GL_LIGHTING)
         
@@ -299,87 +327,149 @@ class Phoenix3DViewer(QOpenGLWidget):
         
         glEnd()
         
+    def draw_world_coordinate_system(self):
+        """Zeichnet das Weltkoordinatensystem mit X,Y,Z-Achsen"""
+        glDisable(GL_LIGHTING)
+        glLineWidth(4.0)
+        
+        # Koordinatenursprung (0,0,0) 
+        origin = [0.0, 0.0, 0.0]
+        axis_length = 0.3  # Achsenlänge in normalisierten Koordinaten
+        
+        # X-Achse (Rot)
+        glColor3f(1.0, 0.0, 0.0)  
+        glBegin(GL_LINES)
+        glVertex3f(origin[0], origin[1], origin[2])
+        glVertex3f(origin[0] + axis_length, origin[1], origin[2])
+        glEnd()
+        
+        # Y-Achse (Grün)
+        glColor3f(0.0, 1.0, 0.0)  
+        glBegin(GL_LINES)
+        glVertex3f(origin[0], origin[1], origin[2])
+        glVertex3f(origin[0], origin[1] + axis_length, origin[2])
+        glEnd()
+        
+        # Z-Achse (Blau)
+        glColor3f(0.0, 0.0, 1.0)  
+        glBegin(GL_LINES)
+        glVertex3f(origin[0], origin[1], origin[2])
+        glVertex3f(origin[0], origin[1], origin[2] + axis_length)
+        glEnd()
+        
+        # Kleine Kugel am Ursprung (Weiß)
+        glColor3f(1.0, 1.0, 1.0)
+        glPointSize(8.0)
+        glBegin(GL_POINTS)
+        glVertex3f(origin[0], origin[1], origin[2])
+        glEnd()
+        glPointSize(1.0)
+        
+        glLineWidth(1.0)  # Zurück zur Standard-Linienbreite
+        glEnable(GL_LIGHTING)
+        
+    def draw_arrow(self, start_point, end_point, direction):
+        """Zeichnet einen kompletten Pfeil von start_point zu end_point"""
+        glColor3f(1.0, 0.0, 0.0)  # Rot
+        glLineWidth(3.0)
+        
+        # Zeichne Pfeilschaft (Linie vom Start- zum Endpunkt)
+        glBegin(GL_LINES)
+        glVertex3f(start_point[0], start_point[1], start_point[2])
+        glVertex3f(end_point[0], end_point[1], end_point[2])
+        glEnd()
+        
+        # Zeichne Pfeilspitze
+        self.draw_arrow_head(start_point, end_point, direction)
+        
+        glLineWidth(1.0)  # Zurück zur Standard-Linienbreite
+        
     def draw_arrow_head(self, start_point, end_point, direction):
-        """Zeichnet eine Pfeilspitze"""
+        """Zeichnet eine einfache Pfeilspitze"""
         import math
         
         # Pfeilspitze Parameter
-        head_length = 0.02
-        head_width = 0.01
+        head_length = 0.03  # Länge der Pfeilspitze
+        head_width = 0.015   # Breite der Pfeilspitze
         
-        # Berechne senkrechte Vektoren für Pfeilspitze
-        # Verwende Cross-Product mit einem beliebigen Vektor
-        if abs(direction[1]) < 0.9:
-            perpendicular1 = [
-                direction[1] * 0 - direction[2] * 1,
-                direction[2] * 1 - direction[0] * 0,
-                direction[0] * 1 - direction[1] * 0
-            ]
+        # Berechne einen senkrechten Vektor zu direction
+        # Wähle eine Achse die am wenigsten parallel zu direction ist
+        if abs(direction[0]) < abs(direction[1]) and abs(direction[0]) < abs(direction[2]):
+            up = [1.0, 0.0, 0.0]
+        elif abs(direction[1]) < abs(direction[2]):
+            up = [0.0, 1.0, 0.0]
         else:
-            perpendicular1 = [
-                direction[1] * 1 - direction[2] * 0,
-                direction[2] * 0 - direction[0] * 1,
-                direction[0] * 0 - direction[1] * 1
-            ]
+            up = [0.0, 0.0, 1.0]
         
-        # Normalisiere
+        # Berechne senkrechten Vektor mit Kreuzprodukt
+        perpendicular1 = [
+            direction[1] * up[2] - direction[2] * up[1],
+            direction[2] * up[0] - direction[0] * up[2],
+            direction[0] * up[1] - direction[1] * up[0]
+        ]
+        
+        # Normalisiere perpendicular1
         length = math.sqrt(sum(x*x for x in perpendicular1))
         if length > 0:
-            perpendicular1 = [x/length for x in perpendicular1]
+            perpendicular1 = [x/length * head_width for x in perpendicular1]
         
-        # Zweiter senkrechter Vektor
+        # Berechne zweiten senkrechten Vektor
         perpendicular2 = [
             direction[1] * perpendicular1[2] - direction[2] * perpendicular1[1],
             direction[2] * perpendicular1[0] - direction[0] * perpendicular1[2],
             direction[0] * perpendicular1[1] - direction[1] * perpendicular1[0]
         ]
         
-        # Rückwärts-Punkt für Pfeilspitze
-        back_point = [
+        # Basis der Pfeilspitze
+        base_point = [
             end_point[0] - direction[0] * head_length,
             end_point[1] - direction[1] * head_length,
             end_point[2] - direction[2] * head_length
         ]
         
-        # Pfeilspitze Eckpunkte
-        tip_points = []
-        for angle in [0, 120, 240]:  # 3 Ecken
-            rad = math.radians(angle)
-            cos_a, sin_a = math.cos(rad), math.sin(rad)
-            
-            tip_point = [
-                back_point[0] + (perpendicular1[0] * cos_a + perpendicular2[0] * sin_a) * head_width,
-                back_point[1] + (perpendicular1[1] * cos_a + perpendicular2[1] * sin_a) * head_width,
-                back_point[2] + (perpendicular1[2] * cos_a + perpendicular2[2] * sin_a) * head_width
-            ]
-            tip_points.append(tip_point)
+        # 4 Punkte für die Pfeilspitze (Pyramide)
+        tip_points = [
+            [base_point[0] + perpendicular1[0], base_point[1] + perpendicular1[1], base_point[2] + perpendicular1[2]],
+            [base_point[0] - perpendicular1[0], base_point[1] - perpendicular1[1], base_point[2] - perpendicular1[2]], 
+            [base_point[0] + perpendicular2[0], base_point[1] + perpendicular2[1], base_point[2] + perpendicular2[2]],
+            [base_point[0] - perpendicular2[0], base_point[1] - perpendicular2[1], base_point[2] - perpendicular2[2]]
+        ]
         
-        # Zeichne Pfeilspitze als Linien
+        # Zeichne Pfeilspitze als Linien von der Spitze zu den Basispunkten
         glColor3f(1.0, 0.0, 0.0)  # Rot
         glBegin(GL_LINES)
         for tip_point in tip_points:
-            glVertex3f(end_point[0], end_point[1], end_point[2])
-            glVertex3f(tip_point[0], tip_point[1], tip_point[2])
+            glVertex3f(end_point[0], end_point[1], end_point[2])  # Pfeilspitze
+            glVertex3f(tip_point[0], tip_point[1], tip_point[2])   # Basispunkt
         glEnd()
         
     def mousePressEvent(self, event):
         """Behandelt Mausklicks"""
         if event.button() == Qt.MouseButton.LeftButton:
-            # Konvertiere 2D-Mausposition zu 3D-Punkt
+            print(f"Linksklick bei Position: {event.position().x()}, {event.position().y()}")
+            
+            # Verwende Ray-Casting für präzise Punktauswahl
             point = self.mouse_to_3d(event.position().x(), event.position().y())
+            print(f"Berechneter 3D-Punkt: {point}")
+            
             if point is not None:
-                # Berechne Kamera-Richtungsvektor
-                camera_direction = self.get_camera_direction()
+                # Einfache Lösung: Alle Anschlussvektoren zeigen in Z-Richtung des Weltkoordinatensystems
+                world_z_direction = [0.0, 0.0, 1.0]
+                print(f"Welt-Z-Richtung: {world_z_direction}")
                 
                 # Erstelle Vektor-Objekt
                 vector_data = {
                     'start_point': point,
-                    'direction': camera_direction
+                    'direction': world_z_direction
                 }
                 
                 self.selected_vectors.append(vector_data)
+                print(f"Vektor hinzugefügt. Anzahl Vektoren: {len(self.selected_vectors)}")
+                
                 self.pointSelected.emit(point[0], point[1], point[2])
                 self.update()
+            else:
+                print("Kein 3D-Punkt gefunden")
         
         self.last_mouse_pos = event.position()
         
@@ -407,49 +497,130 @@ class Phoenix3DViewer(QOpenGLWidget):
         self.update()
         
     def mouse_to_3d(self, x, y):
-        """Konvertiert 2D-Mausposition zu approximiertem 3D-Punkt auf Mesh"""
-        # Vereinfachte Ray-Casting Approximation
-        # In der Realität würde hier echtes Ray-Mesh-Intersection verwendet
+        """OpenGL-basiertes Ray-Casting mit glReadPixels für Tiefenwert"""
+        if self.mesh_vertices is None or self.mesh_faces is None:
+            print("Fehler: Keine Mesh-Daten vorhanden")
+            return None
+            
+        print(f"OpenGL Ray-Casting für Mausposition ({x}, {y})")
         
-        # Konvertiere zu normalisierte Koordinaten
-        viewport = glGetIntegerv(GL_VIEWPORT)
-        width, height = viewport[2], viewport[3]
+        # Stelle sicher dass das Widget den aktuellen OpenGL-Kontext hat
+        self.makeCurrent()
         
-        norm_x = (x - width/2) / (width/2)
-        norm_y = (height/2 - y) / (height/2)  # Y ist invertiert
+        # Lese Tiefenwert an der Mausposition
+        # Y-Koordinate für OpenGL umkehren (OpenGL hat Y=0 unten)
+        gl_y = self.height() - y
         
-        # Projiziere auf eine Ebene vor der Kamera
-        depth = 0.0  # Auf der Mesh-Oberfläche
+        try:
+            # Lese Tiefenwert aus dem Depth Buffer
+            depth = glReadPixels(int(x), int(gl_y), 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT)[0][0]
+            print(f"Depth-Wert an Position ({x}, {gl_y}): {depth}")
+            
+            # Wenn Tiefenwert 1.0 ist, wurde kein Objekt getroffen
+            if depth >= 1.0:
+                print("Kein Objekt an dieser Position (depth = 1.0)")
+                return None
+                
+            # Hole OpenGL Matrizen
+            modelview = glGetDoublev(GL_MODELVIEW_MATRIX)
+            projection = glGetDoublev(GL_PROJECTION_MATRIX) 
+            viewport = glGetIntegerv(GL_VIEWPORT)
+            
+            # Verwende gluUnProject mit dem gelesenen Tiefenwert
+            from OpenGL.GLU import gluUnProject
+            
+            world_x, world_y, world_z = gluUnProject(
+                x, gl_y, depth,
+                modelview, projection, viewport
+            )
+            
+            world_point = [world_x, world_y, world_z]
+            print(f"3D Weltkoordinaten: {world_point}")
+            
+            # Transformiere zurück zu ursprünglichen Koordinaten
+            if hasattr(self, 'mesh_center') and hasattr(self, 'mesh_scale'):
+                original_point = [
+                    world_point[0] * self.mesh_scale + self.mesh_center[0],
+                    world_point[1] * self.mesh_scale + self.mesh_center[1], 
+                    world_point[2] * self.mesh_scale + self.mesh_center[2]
+                ]
+                print(f"Transformiert zu ursprünglichen Koordinaten: {original_point}")
+                return original_point
+            else:
+                return world_point
+                
+        except Exception as e:
+            print(f"Fehler beim OpenGL Ray-Casting: {e}")
+            return None
         
-        # Transformiere basierend auf aktueller Kamera
-        scale = self.camera_distance * 0.1
-        point_x = norm_x * scale
-        point_y = norm_y * scale
-        point_z = depth
+    def ray_triangle_intersect(self, ray_origin, ray_direction, v0, v1, v2):
+        """Möller-Trumbore Ray-Triangle Intersection Algorithm - Robuste Version"""
+        EPSILON = 1e-6
         
-        # Rotiere basierend auf Kamera-Rotation (vereinfacht)
-        rad_y = math.radians(-self.camera_rotation_y)
-        rad_x = math.radians(-self.camera_rotation_x)
-        
-        # Einfache Rotation um Y-Achse
-        x_rot = point_x * math.cos(rad_y) - point_z * math.sin(rad_y)
-        z_rot = point_x * math.sin(rad_y) + point_z * math.cos(rad_y)
-        
-        return [x_rot, point_y, z_rot]
+        try:
+            # Kanten des Dreiecks
+            edge1 = v1 - v0
+            edge2 = v2 - v0
+            
+            # Cross product von Ray-Richtung und edge2
+            h = np.cross(ray_direction, edge2)
+            
+            # Determinante
+            det = np.dot(edge1, h)
+            
+            # Ray ist parallel zum Dreieck
+            if abs(det) < EPSILON:
+                return None
+                
+            inv_det = 1.0 / det
+            
+            # Vektor vom Eckpunkt zum Ray-Ursprung
+            s = ray_origin - v0
+            
+            # Baryzentrischer Koordinate u
+            u = inv_det * np.dot(s, h)
+            if u < 0.0 or u > 1.0:
+                return None
+                
+            # Cross product von s und edge1
+            q = np.cross(s, edge1)
+            
+            # Baryzentrischer Koordinate v
+            v = inv_det * np.dot(ray_direction, q)
+            if v < 0.0 or u + v > 1.0:
+                return None
+                
+            # Berechne t (Distanz entlang Ray)
+            t = inv_det * np.dot(edge2, q)
+            
+            # Ray intersection - erweitere den zulässigen Bereich
+            if t > EPSILON and t < 1000.0:  # Erlaube größere Distanzen
+                intersection_point = ray_origin + t * ray_direction
+                return intersection_point
+                
+            return None
+            
+        except Exception as e:
+            print(f"Fehler im Ray-Triangle-Test: {e}")
+            return None
         
     def get_camera_direction(self):
-        """Berechnet die normalisierte Richtung von der Kamera zum Objekt"""
+        """Berechnet die normalisierte Richtung vom Objekt zur Kamera (für Normalvektoren)"""
         import math
         
         # Konvertiere Rotation zu Radianten
         rad_x = math.radians(self.camera_rotation_x)
         rad_y = math.radians(self.camera_rotation_y)
         
-        # Berechne Kamera-Richtungsvektor (invertiert da wir zur Kamera zeigen wollen)
-        # Standard OpenGL Kamera blickt in negative Z-Richtung
-        direction_x = math.sin(rad_y) * math.cos(rad_x)
-        direction_y = math.sin(rad_x)
-        direction_z = math.cos(rad_y) * math.cos(rad_x)
+        # Berechne Kamera-Position relativ zum Objekt
+        cam_x = self.camera_distance * math.sin(rad_y) * math.cos(rad_x)
+        cam_y = -self.camera_distance * math.sin(rad_x)
+        cam_z = self.camera_distance * math.cos(rad_y) * math.cos(rad_x)
+        
+        # Richtung vom Objekt (0,0,0) zur Kamera
+        direction_x = cam_x
+        direction_y = cam_y  
+        direction_z = cam_z
         
         # Normalisiere den Vektor
         length = math.sqrt(direction_x**2 + direction_y**2 + direction_z**2)
@@ -459,6 +630,139 @@ class Phoenix3DViewer(QOpenGLWidget):
             direction_z /= length
         
         return [direction_x, direction_y, direction_z]
+
+    def get_camera_position(self):
+        """Berechnet die absolute Position der Kamera im Weltkoordinatensystem"""
+        import math
+        
+        rad_x = math.radians(self.camera_rotation_x)
+        rad_y = math.radians(self.camera_rotation_y)
+        
+        # Kamera-Position in ursprünglichen Koordinaten (vor Normalisierung)
+        if hasattr(self, 'mesh_center') and hasattr(self, 'mesh_scale'):
+            # Berechne Position in normalisierten Koordinaten
+            cam_x_norm = self.camera_distance * math.sin(rad_y) * math.cos(rad_x)
+            cam_y_norm = -self.camera_distance * math.sin(rad_x)
+            cam_z_norm = self.camera_distance * math.cos(rad_y) * math.cos(rad_x)
+            
+            # Transformiere zurück zu ursprünglichen Koordinaten
+            cam_x = cam_x_norm * self.mesh_scale + self.mesh_center[0]
+            cam_y = cam_y_norm * self.mesh_scale + self.mesh_center[1]
+            cam_z = cam_z_norm * self.mesh_scale + self.mesh_center[2]
+            
+            return [cam_x, cam_y, cam_z]
+        else:
+            # Fallback ohne Transformation
+            cam_x = self.camera_distance * math.sin(rad_y) * math.cos(rad_x)
+            cam_y = -self.camera_distance * math.sin(rad_x)
+            cam_z = self.camera_distance * math.cos(rad_y) * math.cos(rad_x)
+            return [cam_x, cam_y, cam_z]
+
+    def get_view_direction(self):
+        """Berechnet die Richtung orthogonal aus dem Bildschirm zum Benutzer"""
+        # Einfache Lösung: Immer in positive Z-Richtung des View-Space
+        # Das entspricht "aus dem Bildschirm heraus" zum Benutzer
+        # Unabhängig von der Kamera-Rotation
+        
+        # In OpenGL View-Space zeigt die positive Z-Achse zum Betrachter
+        # (entgegen der Standard-Konvention wo -Z nach vorne zeigt)
+        return [0.0, 0.0, 1.0]
+
+    def get_screen_normal_direction(self):
+        """Berechnet die Richtung orthogonal zur Bildschirmebene (aus dem Bildschirm heraus)"""
+        # Die Screen-Normal entspricht der inversen Kamera-Blickrichtung
+        # In OpenGL zeigt die Kamera standardmäßig in -Z Richtung
+        # Wir wollen aber +Z (aus dem Bildschirm heraus)
+        
+        import math
+        rad_x = math.radians(self.camera_rotation_x)
+        rad_y = math.radians(self.camera_rotation_y)
+        
+        # Berechne die Kamera-Forward-Richtung (wohin die Kamera blickt)
+        # Und invertiere sie für "aus dem Bildschirm heraus"
+        forward_x = math.sin(rad_y) * math.cos(rad_x)
+        forward_y = -math.sin(rad_x)  # Negativ wegen der Rotation
+        forward_z = math.cos(rad_y) * math.cos(rad_x)
+        
+        # Normalisiere
+        length = math.sqrt(forward_x**2 + forward_y**2 + forward_z**2)
+        if length > 0:
+            forward_x /= length
+            forward_y /= length
+            forward_z /= length
+            
+        return [forward_x, forward_y, forward_z]
+
+    def get_current_view_normal(self):
+        """Transformiert Camera-Space Z-Vektor [0,0,1] zu World-Space mit 3x3 Matrix"""
+        import math
+        import numpy as np
+        
+        # Camera-Space Z-Vektor (zeigt aus dem Bildschirm heraus)
+        camera_z = np.array([0.0, 0.0, 1.0])
+        
+        # Rotationswinkel 
+        rad_x = math.radians(self.camera_rotation_x)
+        rad_y = math.radians(self.camera_rotation_y)
+        
+        # 3x3 Rotationsmatrix um X-Achse
+        rot_x = np.array([
+            [1.0, 0.0, 0.0],
+            [0.0, math.cos(rad_x), -math.sin(rad_x)],
+            [0.0, math.sin(rad_x), math.cos(rad_x)]
+        ])
+        
+        # 3x3 Rotationsmatrix um Y-Achse  
+        rot_y = np.array([
+            [math.cos(rad_y), 0.0, math.sin(rad_y)],
+            [0.0, 1.0, 0.0],
+            [-math.sin(rad_y), 0.0, math.cos(rad_y)]
+        ])
+        
+        # Kombinierte Rotationsmatrix (erst Y, dann X - wie in OpenGL)
+        # Für die Inverse (Camera-zu-World) transponieren wir die Matrix
+        camera_to_world = (rot_y @ rot_x).T
+        
+        # Transformiere Camera-Z-Vektor zu World-Space
+        world_normal = camera_to_world @ camera_z
+        
+        # Normalisiere (sollte bereits normalisiert sein)
+        length = np.linalg.norm(world_normal)
+        if length > 0:
+            world_normal = world_normal / length
+        
+        return world_normal.tolist()
+
+    def get_surface_point_simplified(self, mouse_x, mouse_y):
+        """Vereinfachte Methode um einen Oberflächenpunkt zu bestimmen"""
+        if self.mesh_vertices is None or len(self.mesh_vertices) == 0:
+            return None
+        
+        # Berechne Offset basierend auf Mausposition (relativ zum Zentrum)
+        widget_width = self.width()
+        widget_height = self.height()
+        
+        # Normalisierte Mausposition (-1 bis 1)
+        normalized_x = (mouse_x / widget_width) * 2.0 - 1.0
+        normalized_y = (mouse_y / widget_height) * 2.0 - 1.0
+        
+        # Invertiere Y (OpenGL Koordinatensystem)
+        normalized_y = -normalized_y
+        
+        # Erstelle Punkt leicht versetzt vom Objektzentrum
+        # Das normalisierte Objekt ist um [0,0,0] zentriert
+        base_point = [0.0, 0.0, 0.0]  # Objektzentrum
+        
+        # Füge kleine Verschiebung basierend auf Mausposition hinzu
+        offset_scale = 0.3  # Maximaler Offset
+        point = [
+            base_point[0] + normalized_x * offset_scale,
+            base_point[1] + normalized_y * offset_scale,  
+            base_point[2]  # Z bleibt am Zentrum
+        ]
+        
+        print(f"Vereinfachter Punkt erstellt: {point} (Maus: {normalized_x:.3f}, {normalized_y:.3f})")
+        return point
         
     def clear_points(self):
         """Löscht alle ausgewählten Vektoren"""
@@ -468,6 +772,11 @@ class Phoenix3DViewer(QOpenGLWidget):
     def get_points(self):
         """Gibt alle ausgewählten Vektoren zurück"""
         return self.selected_vectors.copy()
+
+    def set_mesh_visibility(self, visible):
+        """Setzt die Sichtbarkeit des Mesh"""
+        self.show_mesh = visible
+        self.update()
         
     def keyPressEvent(self, event):
         """Behandelt Tastatureingaben für Zoom"""
@@ -498,7 +807,7 @@ class Phoenix3DViewer(QOpenGLWidget):
         
     def reset_view(self):
         """Setzt die Kamera auf Standardansicht zurück"""
-        self.camera_distance = 0.1
+        self.camera_distance = 2.5
         self.camera_rotation_x = -20
         self.camera_rotation_y = 45
         self.update()
@@ -545,6 +854,18 @@ class PhoenixMainWindow(QMainWindow):
         title_label = QLabel("Anschlussvektoren")
         title_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
         sidebar_layout.addWidget(title_label)
+        
+        # Checkbox für Objektsichtbarkeit
+        self.mesh_visibility_checkbox = QCheckBox("Objekt anzeigen")
+        self.mesh_visibility_checkbox.setChecked(True)
+        self.mesh_visibility_checkbox.toggled.connect(self.toggle_mesh_visibility)
+        sidebar_layout.addWidget(self.mesh_visibility_checkbox)
+        
+        # Checkbox für Koordinatensystem
+        self.coordinate_system_checkbox = QCheckBox("Koordinatensystem anzeigen")
+        self.coordinate_system_checkbox.setChecked(True)
+        self.coordinate_system_checkbox.toggled.connect(self.toggle_coordinate_system)
+        sidebar_layout.addWidget(self.coordinate_system_checkbox)
         
         # Punktliste
         self.points_list = QListWidget()
@@ -733,6 +1054,19 @@ class PhoenixMainWindow(QMainWindow):
             
         except Exception as e:
             QMessageBox.critical(self, "Fehler", f"Fehler beim Speichern:\n{str(e)}")
+
+    def toggle_mesh_visibility(self, checked):
+        """Schaltet die Sichtbarkeit des Mesh um"""
+        self.viewer.set_mesh_visibility(checked)
+        status = "sichtbar" if checked else "ausgeblendet"
+        self.statusBar().showMessage(f"Objekt {status}")
+
+    def toggle_coordinate_system(self, checked):
+        """Schaltet die Sichtbarkeit des Koordinatensystems um"""
+        self.viewer.show_coordinate_system = checked
+        self.viewer.update()
+        status = "sichtbar" if checked else "ausgeblendet"
+        self.statusBar().showMessage(f"Koordinatensystem {status}")
 
 def main():
     app = QApplication(sys.argv)
