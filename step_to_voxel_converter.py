@@ -371,8 +371,8 @@ def detect_contours(gradient_magnitude, threshold_factor=0.1):
     binary_image = cv2.morphologyEx(binary_image, cv2.MORPH_CLOSE, kernel)
     # binary_image = cv2.morphologyEx(binary_image, cv2.MORPH_OPEN, kernel)  # Open kann dünne Linien zerstören
     
-    # Finde Konturen
-    contours, _ = cv2.findContours(binary_image, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    # Finde Konturen mit Hierarchie-Information
+    contours, hierarchy = cv2.findContours(binary_image, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
     
     # Filtere kleine Konturen heraus
     min_contour_area = 20  # Minimale Konturengröße in Pixeln (reduziert für Randlinien)
@@ -410,20 +410,90 @@ def detect_contours(gradient_magnitude, threshold_factor=0.1):
             cy = int(M["m01"] / M["m00"])
             cv2.putText(contour_image, f"C{i+1}", (cx-10, cy), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
     
-    return filtered_contours, binary_image, contour_image
+    return filtered_contours, binary_image, contour_image, hierarchy
 
-def save_contour_analysis(binary_image, contour_image, contours, extent, step_name, vectors=None, output_dir=None):
+def filter_nested_contours_with_hierarchy(contours, hierarchy):
+    """
+    Entfernt verschachtelte Konturen basierend auf OpenCV Hierarchie-Information
+    
+    Args:
+        contours: Liste von OpenCV Konturen
+        hierarchy: OpenCV Hierarchie-Array [next, previous, first_child, parent]
+    
+    Returns:
+        filtered_contours: Liste von Konturen ohne verschachtelte Konturen
+    """
+    if len(contours) <= 1 or hierarchy is None:
+        return contours
+    
+    print("Filtere verschachtelte Konturen mit OpenCV Hierarchie...")
+    
+    # Hierarchie-Format: [next, previous, first_child, parent]
+    # parent == -1: Kontur ist auf oberster Ebene (nicht verschachtelt)
+    # parent >= 0: Kontur hat eine Eltern-Kontur (ist verschachtelt)
+    
+    filtered_indices = []
+    removed_count = 0
+    
+    for i in range(len(contours)):
+        parent_index = hierarchy[0][i][3]  # Parent-Index
+        
+        if parent_index == -1:
+            # Kontur ist auf oberster Ebene - behalten
+            filtered_indices.append(i)
+        else:
+            # Kontur ist verschachtelt - entfernen
+            print(f"  Entferne Kontur C{i+1} (Kind von C{parent_index+1})")
+            removed_count += 1
+    
+    filtered_contours = [contours[i] for i in filtered_indices]
+    
+    print(f"Verschachtelte Konturen: {len(contours)} -> {len(filtered_contours)} (entfernt: {removed_count})")
+    
+    return filtered_contours
+
+def save_contour_analysis(binary_image, contour_image, contours, hierarchy, extent, step_name, vectors=None, output_dir=None):
     """Speichert die Kontur-Analyse als Bilder"""
     print("Speichere Kontur-Analyse...")
+    
+    # Filtere verschachtelte Konturen mit OpenCV Hierarchie
+    filtered_contours = filter_nested_contours_with_hierarchy(contours, hierarchy)
+    
+    # Erstelle gefiltertes Konturen-Bild
+    filtered_contour_image = cv2.cvtColor(binary_image, cv2.COLOR_GRAY2RGB)
+    
+    colors = [
+        (255, 0, 0),    # Rot
+        (0, 255, 0),    # Grün  
+        (0, 0, 255),    # Blau
+        (255, 255, 0),  # Gelb
+        (255, 0, 255),  # Magenta
+        (0, 255, 255),  # Cyan
+        (255, 128, 0),  # Orange
+        (128, 0, 255),  # Violett
+    ]
+    
+    for i, contour in enumerate(filtered_contours):
+        color = colors[i % len(colors)]
+        cv2.drawContours(filtered_contour_image, [contour], -1, color, 2)
+        
+        # Berechne Zentroid für Text-Position
+        M = cv2.moments(contour)
+        if M["m00"] != 0:
+            cx = int(M["m10"] / M["m00"])
+            cy = int(M["m01"] / M["m00"])
+            cv2.putText(filtered_contour_image, f"F{i+1}", (cx-10, cy), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
     
     # Bestimme Dateinamen
     if output_dir:
         binary_filename = os.path.join(output_dir, f"{step_name}_contours_binary.png")
         contour_filename = os.path.join(output_dir, f"{step_name}_contours_detected.png")
+        filtered_filename = os.path.join(output_dir, f"{step_name}_contours_filtered.png")
         combined_contour_filename = os.path.join(output_dir, f"{step_name}_contours_analysis.png")
     else:
         binary_filename = f"{step_name}_contours_binary.png"
         contour_filename = f"{step_name}_contours_detected.png"
+        filtered_filename = f"{step_name}_contours_filtered.png"
         combined_contour_filename = f"{step_name}_contours_analysis.png"
     
     # Speichere Binärbild
@@ -434,8 +504,12 @@ def save_contour_analysis(binary_image, contour_image, contours, extent, step_na
     cv2.imwrite(contour_filename, cv2.cvtColor(contour_image, cv2.COLOR_RGB2BGR))
     print(f"Konturen-Bild gespeichert: {contour_filename}")
     
-    # Erstelle kombinierte Visualisierung
-    fig, axes = plt.subplots(1, 2, figsize=(15, 6))
+    # Speichere gefiltertes Konturen-Bild
+    cv2.imwrite(filtered_filename, cv2.cvtColor(filtered_contour_image, cv2.COLOR_RGB2BGR))
+    print(f"Gefiltertes Konturen-Bild gespeichert: {filtered_filename}")
+    
+    # Erstelle kombinierte 3-Panel Visualisierung
+    fig, axes = plt.subplots(1, 3, figsize=(22, 6))
     
     # Binärbild links
     axes[0].imshow(binary_image, extent=extent, origin='lower', cmap='gray', interpolation='nearest')
@@ -450,9 +524,9 @@ def save_contour_analysis(binary_image, contour_image, contours, extent, step_na
             axes[0].plot(pos['x'], pos['y'], 'ro', markersize=5, markeredgecolor='white', markeredgewidth=1)
             axes[0].text(pos['x'], pos['y'], f"  P{vector['id']}", color='red', fontweight='bold', fontsize=8)
     
-    # Konturen-Bild rechts
+    # Alle Konturen-Bild mitte
     axes[1].imshow(contour_image, extent=extent, origin='lower', interpolation='nearest')
-    axes[1].set_title(f'Erkannte Konturen ({len(contours)} gefunden)')
+    axes[1].set_title(f'Alle Konturen ({len(contours)} gefunden)')
     axes[1].set_xlabel('X-Koordinate')  
     axes[1].set_ylabel('Y-Koordinate')
     
@@ -463,18 +537,37 @@ def save_contour_analysis(binary_image, contour_image, contours, extent, step_na
             axes[1].plot(pos['x'], pos['y'], 'yo', markersize=5, markeredgecolor='black', markeredgewidth=1)
             axes[1].text(pos['x'], pos['y'], f"  P{vector['id']}", color='yellow', fontweight='bold', fontsize=8)
     
+    # Gefilterte Konturen-Bild rechts
+    axes[2].imshow(filtered_contour_image, extent=extent, origin='lower', interpolation='nearest')
+    axes[2].set_title(f'Gefilterte Konturen ({len(filtered_contours)} nach Verschachtelung)')
+    axes[2].set_xlabel('X-Koordinate')  
+    axes[2].set_ylabel('Y-Koordinate')
+    
+    # Anschlusspunkte im gefilterten Konturen-Bild
+    if vectors:
+        for vector in vectors:
+            pos = vector['position']
+            axes[2].plot(pos['x'], pos['y'], 'yo', markersize=5, markeredgecolor='black', markeredgewidth=1)
+            axes[2].text(pos['x'], pos['y'], f"  P{vector['id']}", color='yellow', fontweight='bold', fontsize=8)
+    
     # Kontur-Statistiken als Text
-    if contours:
-        stats_text = "Kontur-Statistiken:\n"
-        for i, contour in enumerate(contours[:5]):  # Zeige nur erste 5 Konturen
+    stats_text = f"Alle Konturen: {len(contours)}\n"
+    stats_text += f"Gefilterte Konturen: {len(filtered_contours)}\n"
+    stats_text += f"Entfernt (verschachtelt): {len(contours) - len(filtered_contours)}\n\n"
+    
+    if filtered_contours:
+        stats_text += "Finale Konturen:\n"
+        for i, contour in enumerate(filtered_contours[:5]):  # Zeige nur erste 5 gefilterte Konturen
             area = cv2.contourArea(contour)
             perimeter = cv2.arcLength(contour, True)
-            stats_text += f"C{i+1}: Area={area:.0f}, Umfang={perimeter:.1f}\n"
+            stats_text += f"F{i+1}: Area={area:.0f}, Umfang={perimeter:.1f}\n"
         
-        if len(contours) > 5:
-            stats_text += f"... und {len(contours)-5} weitere"
+        if len(filtered_contours) > 5:
+            stats_text += f"... und {len(filtered_contours)-5} weitere"
+    else:
+        stats_text += "Keine finalen Konturen"
             
-        plt.figtext(0.02, 0.02, stats_text, fontsize=8, verticalalignment='bottom')
+    plt.figtext(0.02, 0.02, stats_text, fontsize=8, verticalalignment='bottom')
     
     plt.tight_layout()
     plt.subplots_adjust(bottom=0.15)  # Platz für Statistiken
@@ -483,8 +576,8 @@ def save_contour_analysis(binary_image, contour_image, contours, extent, step_na
     print(f"Kombinierte Kontur-Analyse gespeichert: {combined_contour_filename}")
     
     # Detaillierte Kontur-Informationen ausgeben
+    print("Alle Konturen:")
     if contours:
-        print(f"Kontur-Details:")
         for i, contour in enumerate(contours):
             area = cv2.contourArea(contour)
             perimeter = cv2.arcLength(contour, True)
@@ -496,6 +589,20 @@ def save_contour_analysis(binary_image, contour_image, contours, extent, step_na
             print(f"  C{i+1}: Area={area:.0f}, Umfang={perimeter:.1f}, Eckpunkte={len(approx)}")
     else:
         print("  Keine Konturen erkannt")
+    
+    print("Finale gefilterte Konturen:")
+    if filtered_contours:
+        for i, contour in enumerate(filtered_contours):
+            area = cv2.contourArea(contour)
+            perimeter = cv2.arcLength(contour, True)
+            
+            # Approximiere Kontur für Formerkennung
+            epsilon = 0.02 * perimeter
+            approx = cv2.approxPolyDP(contour, epsilon, True)
+            
+            print(f"  F{i+1}: Area={area:.0f}, Umfang={perimeter:.1f}, Eckpunkte={len(approx)}")
+    else:
+        print("  Keine finalen Konturen")
 
 def visualize_depth_gradients(depth_image, grad_x, grad_y, gradient_magnitude, extent, step_name, vectors=None, output_dir=None):
     """Visualisiert Tiefenbild und seine Gradienten mit Anschlusspunkten"""
@@ -726,14 +833,14 @@ def process_step_file(step_file):
             grad_x, grad_y, gradient_magnitude = differentiate_depth_image(depth_image)
             if gradient_magnitude is not None:
                 # Erkenne Konturen
-                contours, binary_image, contour_image = detect_contours(gradient_magnitude)
+                contours, binary_image, contour_image, hierarchy = detect_contours(gradient_magnitude)
                 
                 # Visualisiere alle Ergebnisse
                 visualize_depth_gradients(depth_image, grad_x, grad_y, gradient_magnitude, extent, step_name, vectors, output_dir)
                 
                 # Speichere Kontur-Analyse
                 if contour_image is not None:
-                    save_contour_analysis(binary_image, contour_image, contours, extent, step_name, vectors, output_dir)
+                    save_contour_analysis(binary_image, contour_image, contours, hierarchy, extent, step_name, vectors, output_dir)
         
         print(f"[OK] Erfolgreich verarbeitet: {os.path.basename(step_file)}")
         return True
