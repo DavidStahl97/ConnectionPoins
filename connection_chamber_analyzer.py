@@ -584,7 +584,7 @@ def complete_individual_cut_contours(binary_image, contours, frame_width=3):
     
     return completed_image, new_contours, new_hierarchy
 
-def find_contours_with_connection_points(contours, vectors, extent, frame_width=5):
+def find_contours_with_connection_points(contours, vectors, extent, frame_width=5, original_image_shape=None):
     """Findet Konturen, die Anschlusspunkte enthalten"""
     if not vectors:
         return []
@@ -593,8 +593,14 @@ def find_contours_with_connection_points(contours, vectors, extent, frame_width=
     
     # Berechne Koordinaten-Transformationen für erweiterten Bereich
     x_min, x_max, y_min, y_max = extent
-    old_width = 401  # Aus der Tiefenbild-Auflösung bekannt 
-    old_height = 43
+    
+    # Verwende tatsächliche Bildabmessungen wenn verfügbar, sonst fallback auf hardcoded
+    if original_image_shape is not None:
+        old_height, old_width = original_image_shape[:2]
+    else:
+        old_width = 401  # Fallback für Kompatibilität
+        old_height = 43
+    
     new_width = old_width + 2 * frame_width
     new_height = old_height + 2 * frame_width
     
@@ -643,7 +649,7 @@ def save_contour_analysis(binary_image, contour_image, contours, hierarchy, exte
     filtered_contours = filter_nested_contours_with_hierarchy(completed_contours, completed_hierarchy)
     
     # Finde Konturen mit Anschlusspunkten
-    connection_contours = find_contours_with_connection_points(filtered_contours, vectors, extent, frame_width=5)
+    connection_contours = find_contours_with_connection_points(filtered_contours, vectors, extent, frame_width=5, original_image_shape=binary_image.shape)
     
     # Erstelle sauberes gefiltertes Konturen-Bild (nur schwarzer Hintergrund)
     filtered_contour_image = np.zeros((completed_image.shape[0], completed_image.shape[1], 3), dtype=np.uint8)
