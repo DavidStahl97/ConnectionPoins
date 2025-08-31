@@ -12,13 +12,47 @@ import trimesh
 import open3d as o3d
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, 
                              QHBoxLayout, QWidget, QPushButton, QLabel, 
-                             QListWidget, QListWidgetItem, QMessageBox, QStatusBar, QFileDialog, QCheckBox)
+                             QListWidget, QListWidgetItem, QMessageBox, QStatusBar, QFileDialog, QCheckBox, QProgressBar)
 from PyQt6.QtOpenGLWidgets import QOpenGLWidget
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QThread
 from PyQt6.QtGui import QFont, QPixmap, QAction
 from OpenGL.GL import *
 from OpenGL.arrays import vbo
 import math
+
+class ChamberAnalyzerThread(QThread):
+    """Thread für die asynchrone Ausführung des Chamber Analyzers"""
+    
+    finished = pyqtSignal(bool, str)  # success, message
+    progress = pyqtSignal(str)  # status message
+    
+    def __init__(self, step_file_path, working_directory):
+        super().__init__()
+        self.step_file_path = step_file_path
+        self.working_directory = working_directory
+        
+    def run(self):
+        """Führt den Chamber Analyzer im Hintergrund aus"""
+        try:
+            import subprocess
+            import sys
+            
+            self.progress.emit("Starte Kammer-Analyse...")
+            
+            # Führe connection_chamber_analyzer.py mit der STEP-Datei aus
+            cmd = [sys.executable, "connection_chamber_analyzer.py", self.step_file_path]
+            
+            # Starte den Analyzer als separaten Prozess
+            result = subprocess.run(cmd, capture_output=True, text=True, cwd=self.working_directory)
+            
+            if result.returncode == 0:
+                self.finished.emit(True, "Kammer-Analyse erfolgreich abgeschlossen!")
+            else:
+                error_msg = result.stderr if result.stderr else result.stdout
+                self.finished.emit(False, f"Fehler bei der Kammer-Analyse:\n\n{error_msg}")
+                
+        except Exception as e:
+            self.finished.emit(False, f"Fehler beim Starten der Kammer-Analyse:\n\n{str(e)}")
 
 class STEP3DViewer(QOpenGLWidget):
     """OpenGL 3D-Viewer für STEP-Dateien"""
@@ -897,6 +931,7 @@ class STEP3DMainWindow(QMainWindow):
         self.selected_points = []
         self.connection_points_file = "step_connection_points.json"
         self.current_step_file = None  # Pfad zur aktuell geladenen STEP-Datei
+        self.analyzer_thread = None  # Thread für Kammer-Analyse
         
         self.initUI()
         # Lade STEP-Dateien aus Data-Ordner
@@ -948,6 +983,19 @@ class STEP3DMainWindow(QMainWindow):
         self.coordinate_system_checkbox.setChecked(True)
         self.coordinate_system_checkbox.toggled.connect(self.toggle_coordinate_system)
         sidebar_layout.addWidget(self.coordinate_system_checkbox)
+        
+        # Chamber Analyzer Button
+        self.analyzer_btn = QPushButton("🔬 Kammer-Analyse starten")
+        self.analyzer_btn.setStyleSheet("QPushButton { background-color: #2196F3; color: white; font-weight: bold; padding: 8px; }")
+        self.analyzer_btn.setEnabled(False)  # Initially disabled until STEP file is loaded
+        self.analyzer_btn.clicked.connect(self.run_chamber_analyzer)
+        sidebar_layout.addWidget(self.analyzer_btn)
+        
+        # Progress Bar für Kammer-Analyse
+        self.analysis_progress = QProgressBar()
+        self.analysis_progress.setVisible(False)  # Initially hidden
+        self.analysis_progress.setRange(0, 0)  # Indeterminate progress
+        sidebar_layout.addWidget(self.analysis_progress)
         
         # Punktliste
         self.points_list = QListWidget()
@@ -1275,6 +1323,59 @@ class STEP3DMainWindow(QMainWindow):
         self.load_step_file(file_path)
         # Nach dem Laden der STEP-Datei, prüfe auf entsprechende JSON-Datei
         self.auto_load_json_if_exists()
+        
+        # Aktiviere Kammer-Analyzer Button
+        self.analyzer_btn.setEnabled(True)
+        
+    def run_chamber_analyzer(self):
+        """Startet den connection_chamber_analyzer für die aktuelle STEP-Datei"""
+        if not self.current_step_file:
+            QMessageBox.warning(self, "Fehler", "Keine STEP-Datei geladen")
+            return
+            
+        # Prüfe ob bereits eine Analyse läuft
+        if self.analyzer_thread and self.analyzer_thread.isRunning():
+            QMessageBox.information(self, "Info", "Kammer-Analyse läuft bereits...")
+            return
+            
+        filename = os.path.basename(self.current_step_file)
+        
+        # UI für Ladevorgang vorbereiten
+        self.analyzer_btn.setEnabled(False)
+        self.analyzer_btn.setText("🔬 Analyse läuft...")
+        self.analysis_progress.setVisible(True)
+        
+        # Thread für Kammer-Analyse erstellen und starten
+        self.analyzer_thread = ChamberAnalyzerThread(self.current_step_file, os.path.dirname(__file__))
+        self.analyzer_thread.progress.connect(self.on_analyzer_progress)
+        self.analyzer_thread.finished.connect(self.on_analyzer_finished)
+        self.analyzer_thread.start()
+        
+    def on_analyzer_progress(self, message):
+        """Callback für Fortschritts-Updates der Kammer-Analyse"""
+        self.statusBar().showMessage(message)
+        
+    def on_analyzer_finished(self, success, message):
+        """Callback wenn Kammer-Analyse abgeschlossen ist"""
+        # UI zurücksetzen
+        self.analyzer_btn.setEnabled(True)
+        self.analyzer_btn.setText("🔬 Kammer-Analyse starten")
+        self.analysis_progress.setVisible(False)
+        
+        filename = os.path.basename(self.current_step_file)
+        
+        if success:
+            self.statusBar().showMessage(f"Kammer-Analyse für {filename} abgeschlossen")
+            QMessageBox.information(self, "Erfolg", f"{message}\n\nAusgabedateien wurden im Data-Ordner erstellt.")
+            
+            # Lade JSON-Daten neu, falls sie aktualisiert wurden
+            self.auto_load_json_if_exists()
+        else:
+            self.statusBar().showMessage("Fehler bei der Kammer-Analyse")
+            QMessageBox.critical(self, "Fehler", message)
+            
+        # Thread cleanup
+        self.analyzer_thread = None
 
 def main():
     app = QApplication(sys.argv)
