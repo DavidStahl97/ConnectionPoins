@@ -370,6 +370,16 @@ def visualize_depth_gradients(depth_image, grad_x, grad_y, gradient_magnitude, e
     plt.colorbar(im4, ax=axes[1,1], label='|Gradient|')
     
     plt.tight_layout()
+    
+    # Speichere das 2x2-Layout ebenfalls als Bild
+    if output_dir:
+        combined_filename = os.path.join(output_dir, f"{step_name}_combined_analysis.png")
+    else:
+        combined_filename = f"{step_name}_combined_analysis.png"
+    
+    plt.savefig(combined_filename, dpi=150, bbox_inches='tight')
+    print(f"Kombinierte Analyse gespeichert: {combined_filename}")
+    
     plt.show()
     
     # Speichere auch Gradientenbilder
@@ -381,15 +391,43 @@ def visualize_depth_gradients(depth_image, grad_x, grad_y, gradient_magnitude, e
     plt.ylabel('Y-Koordinate')
     plt.tight_layout()
     
-    # Speichere Gradientenbild in Ordner falls angegeben
+    # Speichere Gradientenbilder in Ordner falls angegeben
     if output_dir:
         gradient_filename = os.path.join(output_dir, f"{step_name}_gradient_magnitude.png")
+        grad_x_filename = os.path.join(output_dir, f"{step_name}_gradient_x.png")
+        grad_y_filename = os.path.join(output_dir, f"{step_name}_gradient_y.png")
     else:
         gradient_filename = f"{step_name}_gradient_magnitude.png"
+        grad_x_filename = f"{step_name}_gradient_x.png"
+        grad_y_filename = f"{step_name}_gradient_y.png"
     
     plt.savefig(gradient_filename, dpi=150, bbox_inches='tight')
     plt.close()
-    print(f"Gradientenbild gespeichert: {gradient_filename}")
+    print(f"Gradientenmagnitude gespeichert: {gradient_filename}")
+    
+    # Speichere X-Gradient als separates Bild
+    plt.figure(figsize=(10, 8))
+    plt.imshow(grad_x, extent=extent, origin='lower', cmap='RdBu', interpolation='nearest')
+    plt.colorbar(label='X-Gradient (∂z/∂x)')
+    plt.title('X-Gradient des Tiefenbilds')
+    plt.xlabel('X-Koordinate')
+    plt.ylabel('Y-Koordinate')
+    plt.tight_layout()
+    plt.savefig(grad_x_filename, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"X-Gradient gespeichert: {grad_x_filename}")
+    
+    # Speichere Y-Gradient als separates Bild
+    plt.figure(figsize=(10, 8))
+    plt.imshow(grad_y, extent=extent, origin='lower', cmap='RdBu', interpolation='nearest')
+    plt.colorbar(label='Y-Gradient (∂z/∂y)')
+    plt.title('Y-Gradient des Tiefenbilds')
+    plt.xlabel('X-Koordinate')
+    plt.ylabel('Y-Koordinate')
+    plt.tight_layout()
+    plt.savefig(grad_y_filename, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"Y-Gradient gespeichert: {grad_y_filename}")
 
 def visualize_voxels_and_vectors(voxel_grid, vector_geometries):
     """Visualisiert Voxel Grid und Anschlussvektoren mit Open3D"""
