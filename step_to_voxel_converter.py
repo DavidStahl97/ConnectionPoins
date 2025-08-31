@@ -330,7 +330,7 @@ def differentiate_depth_image(depth_image):
     
     return grad_x, grad_y, gradient_magnitude
 
-def visualize_depth_gradients(depth_image, grad_x, grad_y, gradient_magnitude, extent, step_name):
+def visualize_depth_gradients(depth_image, grad_x, grad_y, gradient_magnitude, extent, step_name, output_dir=None):
     """Visualisiert Tiefenbild und seine Gradienten"""
     if depth_image is None:
         print("Keine Tiefenbild-Daten für Gradient-Visualisierung")
@@ -381,7 +381,12 @@ def visualize_depth_gradients(depth_image, grad_x, grad_y, gradient_magnitude, e
     plt.ylabel('Y-Koordinate')
     plt.tight_layout()
     
-    gradient_filename = f"{step_name}_gradient_magnitude.png"
+    # Speichere Gradientenbild in Ordner falls angegeben
+    if output_dir:
+        gradient_filename = os.path.join(output_dir, f"{step_name}_gradient_magnitude.png")
+    else:
+        gradient_filename = f"{step_name}_gradient_magnitude.png"
+    
     plt.savefig(gradient_filename, dpi=150, bbox_inches='tight')
     plt.close()
     print(f"Gradientenbild gespeichert: {gradient_filename}")
@@ -440,14 +445,19 @@ def main():
         
         # 6. Berechne und visualisiere Gradienten
         if depth_image is not None:
-            # Optional: Speichere Tiefenbild
-            output_name = f"{step_name}_depth_image.png"
+            # Erstelle Ausgabe-Ordner basierend auf STEP-Dateiname
+            output_dir = step_name
+            os.makedirs(output_dir, exist_ok=True)
+            print(f"Erstelle Ausgabe-Ordner: {output_dir}")
+            
+            # Speichere Tiefenbild in Ordner
+            output_name = os.path.join(output_dir, f"{step_name}_depth_image.png")
             save_depth_image(depth_image, output_name)
             
             # Berechne und visualisiere Gradienten
             grad_x, grad_y, gradient_magnitude = differentiate_depth_image(depth_image)
             if gradient_magnitude is not None:
-                visualize_depth_gradients(depth_image, grad_x, grad_y, gradient_magnitude, extent, step_name)
+                visualize_depth_gradients(depth_image, grad_x, grad_y, gradient_magnitude, extent, step_name, output_dir)
         
         # 3D-Voxel-Visualisierung übersprungen (nicht mehr benötigt)
         
