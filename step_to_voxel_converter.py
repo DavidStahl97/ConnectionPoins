@@ -509,13 +509,17 @@ def main():
     # Prüfe Command Line Arguments
     if len(sys.argv) > 1:
         step_file = sys.argv[1]
+        # Wenn vollständiger Pfad angegeben, verwende ihn direkt
+        if not os.path.dirname(step_file):
+            # Wenn nur Dateiname angegeben, suche in Data-Ordner
+            step_file = os.path.join("Data", step_file)
     else:
-        # Fallback auf festen Pfad
-        step_file = "pxc_3209510_24_04_PT-2-5_3D.stp"
+        # Fallback auf festen Pfad im Data-Ordner
+        step_file = os.path.join("Data", "pxc_3209510_24_04_PT-2-5_3D.stp")
     
     # Bestimme JSON-Dateiname basierend auf STEP-Datei
-    step_name = os.path.splitext(step_file)[0]
-    json_file = f"{step_name}.json"
+    step_name = os.path.splitext(os.path.basename(step_file))[0]
+    json_file = os.path.join("Data", f"{step_name}.json")
     
     try:
         # 1. Lade STEP-Datei
@@ -535,8 +539,8 @@ def main():
         
         # 6. Berechne und visualisiere Gradienten
         if depth_image is not None:
-            # Erstelle Ausgabe-Ordner basierend auf STEP-Dateiname
-            output_dir = step_name
+            # Erstelle Ausgabe-Ordner im Data-Verzeichnis basierend auf STEP-Dateiname
+            output_dir = os.path.join("Data", step_name)
             os.makedirs(output_dir, exist_ok=True)
             print(f"Erstelle Ausgabe-Ordner: {output_dir}")
             
