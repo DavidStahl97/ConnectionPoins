@@ -22,20 +22,20 @@ PyQt6-basierte 3D-Viewer-Anwendung für STEP-Dateien mit folgenden Hauptfunktion
 - **JSON-Export**: Speicherung der Anschlussvektoren mit Position und Richtung
 - **Performance-Optimierung**: Display Lists und Vertex Arrays für flüssiges Rendering
 
-### 2. **step_to_voxel_converter.py** - Voxel-Konvertierung & Tiefenanalyse
-Kommandozeilen-basiertes Tool für die Konvertierung von STEP-Dateien zu Voxel-Gittern und Tiefenbild-Analyse:
+### 2. **connection_chamber_analyzer.py** - Anschlusspunkt-Kammer-Analyse
+Kommandozeilen-basiertes Tool zur intelligenten Erkennung und Zuordnung von Anschlusspunkten zu geometrischen Kammern:
 
 **🔧 Kernfunktionalitäten:**
-- **STEP zu Voxel**: Konvertiert 3D-Meshes zu hochauflösenden Voxel-Gittern (400x400x400)
-- **Tiefenbild-Generierung**: Erstellt 2D-Projektionen der Voxel-Daten
-- **Gradientenanalyse**: Berechnet X/Y-Gradienten und Gradientenmagnitude mit OpenCV
-- **Automatische Visualisierung**: matplotlib-basierte Darstellung aller Analyseergebnisse
+- **Kammer-Erkennung**: Automatische Identifikation geschlossener Bereiche durch Kontur-Analyse
+- **Anschlusspunkt-Zuordnung**: Präzise Bestimmung welcher Anschlusspunkt in welcher Kammer liegt
+- **Intelligente Konturen-Vervollständigung**: Schließt abgeschnittene Kanten durch Rahmen-Erweiterung
+- **Hierarchische Filterung**: Entfernt verschachtelte Konturen zur Fokussierung auf Hauptkammern
 
 **📈 Analysefunktionen:**
-- **Sobel-Operatoren**: Präzise Gradientenberechnung für Oberflächenerkennung
-- **Multi-Ansicht Visualisierung**: 2x2 Layout mit Original + 3 Gradientenbildern
-- **Bildexport**: PNG-Speicherung aller Analyse-Ergebnisse
-- **Anschlusspunkt-Integration**: Visualisierung der JSON-Vektordaten im Voxelraum
+- **4-Panel Visualisierung**: Vollständige Pipeline-Darstellung von Binärbild bis zur finalen Kammer-Zuordnung
+- **OpenCV Kontur-Erkennung**: Robuste Identifikation zusammenhängender Bereiche mittels Gradientenanalyse
+- **Batch-Verarbeitung**: Automatische Analyse aller STEP-Dateien im Data-Ordner
+- **Detaillierte Statistiken**: Quantitative Auswertung der Kammer-Anschlusspunkt-Zuordnungen
 
 ## 💾 Datenstrukturen
 ```json
@@ -58,17 +58,19 @@ python step_3d_viewer.py
 ```
 Ermöglicht es Ingenieuren, 3D-Modelle aus STEP-Dateien zu laden und präzise Anschlusspunkte mit zugehörigen Richtungsvektoren interaktiv zu definieren.
 
-### step_to_voxel_converter.py
+### connection_chamber_analyzer.py
 ```bash
-# Mit STEP-Datei als Argument
-python step_to_voxel_converter.py model.stp
+# Batch-Analyse aller STEP-Dateien im Data-Ordner
+python connection_chamber_analyzer.py
 
-# Oder Standarddatei verwenden
-python step_to_voxel_converter.py
+# Mit einzelner STEP-Datei als Argument
+python connection_chamber_analyzer.py model.stp
 ```
-Konvertiert STEP-Dateien zu Voxel-Gittern und führt automatisch Tiefenbild-Analyse mit Gradientenberechnung durch. Erstellt dabei folgende Ausgabedateien:
-- `{filename}_depth_image.png` - Normalisiertes Tiefenbild
-- `{filename}_gradient_magnitude.png` - Gradientenmagnitude für Oberflächenerkennung
+Analysiert die geometrischen Kammern in STEP-Dateien und ordnet Anschlusspunkte den entsprechenden Kammern zu. Erstellt dabei folgende Ausgabedateien:
+- `{filename}_contours_analysis.png` - 4-Panel Visualisierung der Kammer-Analyse-Pipeline
+- `{filename}_contours_filtered.png` - Finale Kammern ohne verschachtelte Bereiche
+- `{filename}_depth_image.png` - Tiefenbild mit Anschlusspunkt-Markierungen
+- `{filename}_gradient_magnitude.png` - Gradientenanalyse für Kammer-Erkennung
 
 ## 🔧 Setup
 ```bash
@@ -95,8 +97,11 @@ venv\Scripts\activate
 # Interaktiver 3D-Viewer starten
 python step_3d_viewer.py
 
-# Oder Voxel-Konverter ausführen
-python step_to_voxel_converter.py [dateiname.stp]
+# Kammer-Analyzer für Batch-Verarbeitung ausführen
+python connection_chamber_analyzer.py
+
+# Oder einzelne STEP-Datei analysieren
+python connection_chamber_analyzer.py [dateiname.stp]
 ```
 
 ### Voraussetzungen
