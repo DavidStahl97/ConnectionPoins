@@ -796,16 +796,12 @@ def save_contour_analysis(binary_image, contour_image, contours, hierarchy, exte
     for conn_info in connection_contours:
         pixel_pos = conn_info['pixel_pos']
         cv2.circle(connection_contour_image, pixel_pos, 3, (255, 255, 255), -1)  # Weißer Kreis
-        cv2.putText(connection_contour_image, f"P{conn_info['vector']['id']}", 
-                   (pixel_pos[0] + 5, pixel_pos[1] - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
 
     # Zeichne Kammer-Mittelpunkte als gelbe Kreise
     for center_info in chamber_centers:
         center_pixel = center_info['center_pixel']
         cv2.circle(connection_contour_image, center_pixel, 4, (0, 255, 255), -1)  # Gelber Kreis
         cv2.circle(connection_contour_image, center_pixel, 6, (255, 255, 255), 2)  # Weißer Rand
-        cv2.putText(connection_contour_image, f"M{center_info['vector_id']}", 
-                   (center_pixel[0] + 8, center_pixel[1] - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
 
     # Erstelle kombinierte 4-Panel Visualisierung (2x2 Layout)
     fig, axes = plt.subplots(2, 2, figsize=(16, 12))
@@ -884,7 +880,6 @@ def save_contour_analysis(binary_image, contour_image, contours, hierarchy, exte
         for vector in vectors:
             pos = vector['position']
             axes[1,1].plot(pos['x'], pos['y'], 'wo', markersize=7, markeredgecolor='red', markeredgewidth=2)
-            axes[1,1].text(pos['x'], pos['y'], f"  P{vector['id']}", color='white', fontweight='bold', fontsize=10)
     
     # Kontur-Statistiken als Text
     stats_text = f"Ursprüngliche Konturen: {len(contours)}\n"
