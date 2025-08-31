@@ -708,25 +708,42 @@ def calculate_chamber_centers(connection_contours, extent, original_image_shape,
         world_x = x_min + original_x_pixel * x_scale
         world_y = y_min + (old_height - original_y_pixel - 1) * y_scale
         
-        # Extrahiere Z-Koordinate vom Rand der Kammer (minimale Tiefe der Kontur)
+        # Extrahiere Z-Koordinate vom Rand der Kammer (nur äußere Konturlinie)
         world_z = None
         contour_depths = []
         
-        # Sammle alle Tiefenwerte entlang der Kontur-Punkte
+        # Erstelle temporäres Bild um nur die Konturlinie zu zeichnen
+        temp_mask = np.zeros((old_height, old_width), dtype=np.uint8)
+        
+        # Transformiere Kontur zurück zu originalen Koordinaten
+        original_contour = []
         for point in contour:
-            # Kontur-Punkt in originale Bildkoordinaten transformieren
-            contour_x_pixel = int(point[0][0]) - frame_width
-            contour_y_pixel = int(point[0][1]) - frame_width
+            orig_x = int(point[0][0]) - frame_width
+            orig_y = int(point[0][1]) - frame_width
+            if 0 <= orig_x < old_width and 0 <= orig_y < old_height:
+                original_contour.append([[orig_x, orig_y]])
+        
+        if original_contour:
+            original_contour = np.array(original_contour)
+            # Zeichne nur die Konturlinie (thickness=1 für nur den Rand)
+            cv2.drawContours(temp_mask, [original_contour], -1, 255, thickness=1)
             
-            if (0 <= contour_x_pixel < old_width and 0 <= contour_y_pixel < old_height):
-                depth_value = depth_image[contour_y_pixel, contour_x_pixel]
+            # Finde alle Pixel auf der Konturlinie
+            contour_pixels = np.where(temp_mask == 255)
+            
+            # Sammle Tiefenwerte nur von den Randpixeln
+            for i in range(len(contour_pixels[0])):
+                y_pixel = contour_pixels[0][i] 
+                x_pixel = contour_pixels[1][i]
+                depth_value = depth_image[y_pixel, x_pixel]
                 if not np.isnan(depth_value):
                     contour_depths.append(depth_value)
         
-        # Verwende die minimale Tiefe (der Rand/Anfang der Kammer)
+        # Verwende die maximale Tiefe (der tiefste/hinterste Punkt der Kammer)
         if contour_depths:
-            world_z = min(contour_depths)
-            print(f"    -> Kontur-Tiefenwerte: {len(contour_depths)} Punkte, Min={world_z:.6f}, Max={max(contour_depths):.6f}")
+            world_z = max(contour_depths)
+            min_depth = min(contour_depths)
+            print(f"    -> Kontur-Randtiefenwerte: {len(contour_depths)} Pixel, Min={min_depth:.6f}, Max={world_z:.6f}")
         
         center_info = {
                 'contour_index': conn['contour_index'],
@@ -1231,7 +1248,7 @@ def process_step_file(step_file):
         vectors = load_json_vectors(json_file)
         
         # 3. Konvertiere zu Voxeln
-        voxel_grid = mesh_to_voxels(mesh, voxel_resolution=400)
+        voxel_grid = mesh_to_voxels(mesh, voxel_resolution=800)
         
         # 4. Erstelle Vektor-Marker
         vector_geometries = create_vector_markers(vectors)
