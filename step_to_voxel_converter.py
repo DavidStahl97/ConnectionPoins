@@ -261,32 +261,6 @@ def interpolate_depth_gaps(depth_image):
     
     return filled_image
 
-def visualize_depth_image(depth_image, extent, title="Tiefenbild"):
-    """Visualisiert das Tiefenbild mit matplotlib"""
-    if depth_image is None:
-        print("Kein Tiefenbild zu visualisieren")
-        return
-        
-    plt.figure(figsize=(10, 8))
-    
-    # Verwende eine Farbskala die NaN-Werte transparent macht
-    cmap = plt.cm.viridis
-    cmap.set_bad(color='white', alpha=0.5)  # NaN-Werte in weiß/transparent
-    
-    plt.imshow(depth_image, 
-               extent=extent, 
-               origin='lower', 
-               cmap=cmap,
-               interpolation='nearest')
-    
-    plt.colorbar(label='Tiefe (Z-Koordinate)')
-    plt.title(title)
-    plt.xlabel('X-Koordinate')
-    plt.ylabel('Y-Koordinate')
-    plt.grid(True, alpha=0.3)
-    
-    plt.tight_layout()
-    plt.show()
 
 def save_depth_image(depth_image, filename="depth_image.png"):
     """Speichert das Tiefenbild als Bild-Datei"""
@@ -464,15 +438,13 @@ def main():
         # 5. Erstelle Tiefenbild
         depth_image, extent = voxels_to_depth_image(voxel_grid, direction='z')
         
-        # 6. Visualisiere Tiefenbild
+        # 6. Berechne und visualisiere Gradienten
         if depth_image is not None:
-            visualize_depth_image(depth_image, extent, "Tiefenbild (Z-Projektion)")
-            
             # Optional: Speichere Tiefenbild
             output_name = f"{step_name}_depth_image.png"
             save_depth_image(depth_image, output_name)
             
-            # 7. Berechne und visualisiere Gradienten
+            # Berechne und visualisiere Gradienten
             grad_x, grad_y, gradient_magnitude = differentiate_depth_image(depth_image)
             if gradient_magnitude is not None:
                 visualize_depth_gradients(depth_image, grad_x, grad_y, gradient_magnitude, extent, step_name)
