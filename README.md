@@ -1,4 +1,4 @@
-# STEP 3D Viewer & Voxel Converter - Connection Points
+# STEP 3D Viewer & Connection Chamber Analyzer - Connection Points
 
 Dieses Repository enthält zwei spezialisierte Python-Anwendungen für die Arbeit mit STEP-Dateien und 3D-Geometrie-Analyse:
 
