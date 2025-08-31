@@ -358,7 +358,7 @@ def main():
         vectors = load_json_vectors(json_file)
         
         # 3. Konvertiere zu Voxeln
-        voxel_grid = mesh_to_voxels(mesh, voxel_resolution=100)
+        voxel_grid = mesh_to_voxels(mesh, voxel_resolution=400)
         
         # 4. Erstelle Vektor-Marker
         vector_geometries = create_vector_markers(vectors)
