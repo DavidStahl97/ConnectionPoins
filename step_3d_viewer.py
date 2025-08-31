@@ -57,6 +57,11 @@ class STEP3DViewer(QOpenGLWidget):
         
     def load_mesh_data(self, vertices, faces):
         """Lädt Mesh-Daten in den Viewer"""
+        # Lösche alte OpenGL Display List wenn vorhanden
+        if self.display_list is not None:
+            glDeleteLists(self.display_list, 1)
+            self.display_list = None
+            
         self.original_vertices = np.array(vertices, dtype=np.float32)  # Backup der ursprünglichen Vertices
         self.mesh_vertices = np.array(vertices, dtype=np.float32)
         self.mesh_faces = np.array(faces, dtype=np.uint32)
