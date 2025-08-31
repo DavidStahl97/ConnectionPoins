@@ -1305,11 +1305,56 @@ class STEP3DMainWindow(QMainWindow):
         self.step_files_list.clear()
         for file_path in sorted(step_files):
             filename = os.path.basename(file_path)
-            item = QListWidgetItem(filename)
+            
+            # Prüfe entsprechende JSON-Datei für Vector-Informationen
+            vectors_with_chambers, total_vectors = self.get_vector_counts(file_path)
+            
+            # Formatiere Display-Text mit Vector-Counts
+            display_text = f"({vectors_with_chambers}/{total_vectors}) {filename}"
+            
+            item = QListWidgetItem(display_text)
             item.setData(Qt.ItemDataRole.UserRole, file_path)  # Speichere vollständigen Pfad
             self.step_files_list.addItem(item)
             
         self.statusBar().showMessage(f"{len(step_files)} STEP-Dateien gefunden")
+        
+    def get_vector_counts(self, step_file_path):
+        """Ermittelt die Anzahl der Vektoren und Vektoren mit Kammer-Mittelpunkten aus der JSON-Datei"""
+        try:
+            # Bestimme JSON-Dateiname basierend auf STEP-Datei
+            step_dir = os.path.dirname(step_file_path)
+            step_filename = os.path.basename(step_file_path)
+            step_name_without_ext = os.path.splitext(step_filename)[0]
+            json_filename = f"{step_name_without_ext}.json"
+            json_filepath = os.path.join(step_dir, json_filename)
+            
+            # Prüfe ob JSON-Datei existiert
+            if not os.path.exists(json_filepath):
+                return 0, 0  # Keine JSON-Datei vorhanden
+                
+            # Lade und analysiere JSON-Datei
+            with open(json_filepath, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                
+            if 'connection_vectors' not in data:
+                return 0, 0  # Keine connection_vectors in JSON
+                
+            vectors = data['connection_vectors']
+            total_vectors = len(vectors)
+            vectors_with_chambers = 0
+            
+            # Zähle Vektoren mit chamber_center
+            for vector in vectors:
+                if ('chamber_center' in vector and 
+                    vector['chamber_center'] is not None and
+                    vector['chamber_center'].get('z') is not None):
+                    vectors_with_chambers += 1
+                    
+            return vectors_with_chambers, total_vectors
+            
+        except Exception as e:
+            print(f"Fehler beim Lesen der JSON-Datei {step_file_path}: {e}")
+            return 0, 0  # Fehler beim Lesen
         
     def on_step_file_selected(self, item):
         """Wird aufgerufen wenn eine STEP-Datei aus der Liste ausgewählt wird"""
@@ -1370,12 +1415,35 @@ class STEP3DMainWindow(QMainWindow):
             
             # Lade JSON-Daten neu, falls sie aktualisiert wurden
             self.auto_load_json_if_exists()
+            
+            # Aktualisiere STEP-Dateien Liste um neue Vector-Counts anzuzeigen
+            self.refresh_step_files_list()
         else:
             self.statusBar().showMessage("Fehler bei der Kammer-Analyse")
             QMessageBox.critical(self, "Fehler", message)
             
         # Thread cleanup
         self.analyzer_thread = None
+        
+    def refresh_step_files_list(self):
+        """Aktualisiert die STEP-Dateien Liste um Vector-Counts zu refreshen"""
+        current_selection = None
+        
+        # Merke aktuelle Auswahl
+        current_item = self.step_files_list.currentItem()
+        if current_item:
+            current_selection = current_item.data(Qt.ItemDataRole.UserRole)
+            
+        # Lade Liste neu
+        self.load_step_files_list()
+        
+        # Stelle alte Auswahl wieder her
+        if current_selection:
+            for i in range(self.step_files_list.count()):
+                item = self.step_files_list.item(i)
+                if item.data(Qt.ItemDataRole.UserRole) == current_selection:
+                    self.step_files_list.setCurrentItem(item)
+                    break
 
 def main():
     app = QApplication(sys.argv)
