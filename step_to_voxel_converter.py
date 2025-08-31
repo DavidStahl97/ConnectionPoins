@@ -330,8 +330,8 @@ def differentiate_depth_image(depth_image):
     
     return grad_x, grad_y, gradient_magnitude
 
-def visualize_depth_gradients(depth_image, grad_x, grad_y, gradient_magnitude, extent, step_name, output_dir=None):
-    """Visualisiert Tiefenbild und seine Gradienten"""
+def visualize_depth_gradients(depth_image, grad_x, grad_y, gradient_magnitude, extent, step_name, vectors=None, output_dir=None):
+    """Visualisiert Tiefenbild und seine Gradienten mit Anschlusspunkten"""
     if depth_image is None:
         print("Keine Tiefenbild-Daten für Gradient-Visualisierung")
         return
@@ -348,12 +348,26 @@ def visualize_depth_gradients(depth_image, grad_x, grad_y, gradient_magnitude, e
     axes[0,0].set_ylabel('Y-Koordinate')
     plt.colorbar(im1, ax=axes[0,0], label='Tiefe')
     
+    # Anschlusspunkte hinzufügen
+    if vectors:
+        for vector in vectors:
+            pos = vector['position']
+            axes[0,0].plot(pos['x'], pos['y'], 'ro', markersize=5, markeredgecolor='white', markeredgewidth=1)
+            axes[0,0].text(pos['x'], pos['y'], f"  P{vector['id']}", color='white', fontweight='bold', fontsize=8)
+    
     # X-Gradient
     im2 = axes[0,1].imshow(grad_x, extent=extent, origin='lower', cmap='RdBu', interpolation='nearest')
     axes[0,1].set_title('X-Gradient (∂z/∂x)')
     axes[0,1].set_xlabel('X-Koordinate')
     axes[0,1].set_ylabel('Y-Koordinate')
     plt.colorbar(im2, ax=axes[0,1], label='Gradient X')
+    
+    # Anschlusspunkte hinzufügen
+    if vectors:
+        for vector in vectors:
+            pos = vector['position']
+            axes[0,1].plot(pos['x'], pos['y'], 'ro', markersize=5, markeredgecolor='white', markeredgewidth=1)
+            axes[0,1].text(pos['x'], pos['y'], f"  P{vector['id']}", color='white', fontweight='bold', fontsize=8)
     
     # Y-Gradient  
     im3 = axes[1,0].imshow(grad_y, extent=extent, origin='lower', cmap='RdBu', interpolation='nearest')
@@ -362,12 +376,26 @@ def visualize_depth_gradients(depth_image, grad_x, grad_y, gradient_magnitude, e
     axes[1,0].set_ylabel('Y-Koordinate')
     plt.colorbar(im3, ax=axes[1,0], label='Gradient Y')
     
+    # Anschlusspunkte hinzufügen
+    if vectors:
+        for vector in vectors:
+            pos = vector['position']
+            axes[1,0].plot(pos['x'], pos['y'], 'ro', markersize=5, markeredgecolor='white', markeredgewidth=1)
+            axes[1,0].text(pos['x'], pos['y'], f"  P{vector['id']}", color='white', fontweight='bold', fontsize=8)
+    
     # Gradientenmagnitude
     im4 = axes[1,1].imshow(gradient_magnitude, extent=extent, origin='lower', cmap='hot', interpolation='nearest')
     axes[1,1].set_title('Gradientenmagnitude |∇z|')
     axes[1,1].set_xlabel('X-Koordinate')
     axes[1,1].set_ylabel('Y-Koordinate')
     plt.colorbar(im4, ax=axes[1,1], label='|Gradient|')
+    
+    # Anschlusspunkte hinzufügen
+    if vectors:
+        for vector in vectors:
+            pos = vector['position']
+            axes[1,1].plot(pos['x'], pos['y'], 'ro', markersize=5, markeredgecolor='white', markeredgewidth=1)
+            axes[1,1].text(pos['x'], pos['y'], f"  P{vector['id']}", color='white', fontweight='bold', fontsize=8)
     
     plt.tight_layout()
     
@@ -389,6 +417,14 @@ def visualize_depth_gradients(depth_image, grad_x, grad_y, gradient_magnitude, e
     plt.title('Tiefenbild Gradientenmagnitude')
     plt.xlabel('X-Koordinate')
     plt.ylabel('Y-Koordinate')
+    
+    # Anschlusspunkte hinzufügen
+    if vectors:
+        for vector in vectors:
+            pos = vector['position']
+            plt.plot(pos['x'], pos['y'], 'ro', markersize=5, markeredgecolor='white', markeredgewidth=1)
+            plt.text(pos['x'], pos['y'], f"  P{vector['id']}", color='white', fontweight='bold', fontsize=8)
+    
     plt.tight_layout()
     
     # Speichere Gradientenbilder in Ordner falls angegeben
@@ -412,6 +448,14 @@ def visualize_depth_gradients(depth_image, grad_x, grad_y, gradient_magnitude, e
     plt.title('X-Gradient des Tiefenbilds')
     plt.xlabel('X-Koordinate')
     plt.ylabel('Y-Koordinate')
+    
+    # Anschlusspunkte hinzufügen
+    if vectors:
+        for vector in vectors:
+            pos = vector['position']
+            plt.plot(pos['x'], pos['y'], 'ro', markersize=5, markeredgecolor='white', markeredgewidth=1)
+            plt.text(pos['x'], pos['y'], f"  P{vector['id']}", color='white', fontweight='bold', fontsize=8)
+    
     plt.tight_layout()
     plt.savefig(grad_x_filename, dpi=150, bbox_inches='tight')
     plt.close()
@@ -424,6 +468,14 @@ def visualize_depth_gradients(depth_image, grad_x, grad_y, gradient_magnitude, e
     plt.title('Y-Gradient des Tiefenbilds')
     plt.xlabel('X-Koordinate')
     plt.ylabel('Y-Koordinate')
+    
+    # Anschlusspunkte hinzufügen
+    if vectors:
+        for vector in vectors:
+            pos = vector['position']
+            plt.plot(pos['x'], pos['y'], 'ro', markersize=5, markeredgecolor='white', markeredgewidth=1)
+            plt.text(pos['x'], pos['y'], f"  P{vector['id']}", color='white', fontweight='bold', fontsize=8)
+    
     plt.tight_layout()
     plt.savefig(grad_y_filename, dpi=150, bbox_inches='tight')
     plt.close()
@@ -495,7 +547,7 @@ def main():
             # Berechne und visualisiere Gradienten
             grad_x, grad_y, gradient_magnitude = differentiate_depth_image(depth_image)
             if gradient_magnitude is not None:
-                visualize_depth_gradients(depth_image, grad_x, grad_y, gradient_magnitude, extent, step_name, output_dir)
+                visualize_depth_gradients(depth_image, grad_x, grad_y, gradient_magnitude, extent, step_name, vectors, output_dir)
         
         # 3D-Voxel-Visualisierung übersprungen (nicht mehr benötigt)
         
