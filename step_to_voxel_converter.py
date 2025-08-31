@@ -13,6 +13,7 @@ import trimesh
 import open3d as o3d
 import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
+import cv2
 
 def load_step_file(step_file_path):
     """Lädt eine STEP-Datei und gibt das Mesh zurück"""
@@ -314,6 +315,103 @@ def save_depth_image(depth_image, filename="depth_image.png"):
     plt.imsave(filename, depth_normalized.astype(np.uint8), cmap='viridis')
     print(f"Tiefenbild gespeichert: {filename}")
 
+def differentiate_depth_image(depth_image):
+    """Berechnet Gradient/Differenzierung des Tiefenbilds mit OpenCV"""
+    if depth_image is None:
+        print("Kein Tiefenbild für Differenzierung")
+        return None, None, None
+    
+    print("Berechne Tiefenbild-Differenzierung...")
+    
+    # Konvertiere NaN-Werte zu 0 für OpenCV
+    valid_mask = ~np.isnan(depth_image)
+    depth_clean = np.where(valid_mask, depth_image, 0)
+    
+    # Konvertiere zu 8-bit für OpenCV (normalisiert)
+    if np.sum(valid_mask) > 0:
+        valid_depths = depth_image[valid_mask]
+        depth_min, depth_max = valid_depths.min(), valid_depths.max()
+        
+        if depth_max > depth_min:
+            depth_8bit = np.zeros_like(depth_clean, dtype=np.uint8)
+            depth_8bit[valid_mask] = 255 * (valid_depths - depth_min) / (depth_max - depth_min)
+        else:
+            depth_8bit = np.zeros_like(depth_clean, dtype=np.uint8)
+    else:
+        depth_8bit = np.zeros_like(depth_clean, dtype=np.uint8)
+    
+    # Berechne Gradienten mit Sobel-Operatoren
+    grad_x = cv2.Sobel(depth_8bit, cv2.CV_64F, 1, 0, ksize=3)
+    grad_y = cv2.Sobel(depth_8bit, cv2.CV_64F, 0, 1, ksize=3)
+    
+    # Berechne Gradientenmagnitude
+    gradient_magnitude = np.sqrt(grad_x**2 + grad_y**2)
+    
+    # Setze Gradienten ungültiger Bereiche auf 0
+    grad_x[~valid_mask] = 0
+    grad_y[~valid_mask] = 0
+    gradient_magnitude[~valid_mask] = 0
+    
+    print(f"Differenzierung berechnet - Max Gradient: {gradient_magnitude.max():.2f}")
+    
+    return grad_x, grad_y, gradient_magnitude
+
+def visualize_depth_gradients(depth_image, grad_x, grad_y, gradient_magnitude, extent, step_name):
+    """Visualisiert Tiefenbild und seine Gradienten"""
+    if depth_image is None:
+        print("Keine Tiefenbild-Daten für Gradient-Visualisierung")
+        return
+    
+    fig, axes = plt.subplots(2, 2, figsize=(15, 12))
+    
+    # Original Tiefenbild
+    cmap = plt.cm.viridis
+    cmap.set_bad(color='white', alpha=0.5)
+    
+    im1 = axes[0,0].imshow(depth_image, extent=extent, origin='lower', cmap=cmap, interpolation='nearest')
+    axes[0,0].set_title('Original Tiefenbild')
+    axes[0,0].set_xlabel('X-Koordinate')
+    axes[0,0].set_ylabel('Y-Koordinate')
+    plt.colorbar(im1, ax=axes[0,0], label='Tiefe')
+    
+    # X-Gradient
+    im2 = axes[0,1].imshow(grad_x, extent=extent, origin='lower', cmap='RdBu', interpolation='nearest')
+    axes[0,1].set_title('X-Gradient (∂z/∂x)')
+    axes[0,1].set_xlabel('X-Koordinate')
+    axes[0,1].set_ylabel('Y-Koordinate')
+    plt.colorbar(im2, ax=axes[0,1], label='Gradient X')
+    
+    # Y-Gradient  
+    im3 = axes[1,0].imshow(grad_y, extent=extent, origin='lower', cmap='RdBu', interpolation='nearest')
+    axes[1,0].set_title('Y-Gradient (∂z/∂y)')
+    axes[1,0].set_xlabel('X-Koordinate')
+    axes[1,0].set_ylabel('Y-Koordinate')
+    plt.colorbar(im3, ax=axes[1,0], label='Gradient Y')
+    
+    # Gradientenmagnitude
+    im4 = axes[1,1].imshow(gradient_magnitude, extent=extent, origin='lower', cmap='hot', interpolation='nearest')
+    axes[1,1].set_title('Gradientenmagnitude |∇z|')
+    axes[1,1].set_xlabel('X-Koordinate')
+    axes[1,1].set_ylabel('Y-Koordinate')
+    plt.colorbar(im4, ax=axes[1,1], label='|Gradient|')
+    
+    plt.tight_layout()
+    plt.show()
+    
+    # Speichere auch Gradientenbilder
+    plt.figure(figsize=(10, 8))
+    plt.imshow(gradient_magnitude, extent=extent, origin='lower', cmap='hot', interpolation='nearest')
+    plt.colorbar(label='Gradientenmagnitude')
+    plt.title('Tiefenbild Gradientenmagnitude')
+    plt.xlabel('X-Koordinate')
+    plt.ylabel('Y-Koordinate')
+    plt.tight_layout()
+    
+    gradient_filename = f"{step_name}_gradient_magnitude.png"
+    plt.savefig(gradient_filename, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"Gradientenbild gespeichert: {gradient_filename}")
+
 def visualize_voxels_and_vectors(voxel_grid, vector_geometries):
     """Visualisiert Voxel Grid und Anschlussvektoren mit Open3D"""
     print("Starte 3D-Visualisierung...")
@@ -373,6 +471,11 @@ def main():
             # Optional: Speichere Tiefenbild
             output_name = f"{step_name}_depth_image.png"
             save_depth_image(depth_image, output_name)
+            
+            # 7. Berechne und visualisiere Gradienten
+            grad_x, grad_y, gradient_magnitude = differentiate_depth_image(depth_image)
+            if gradient_magnitude is not None:
+                visualize_depth_gradients(depth_image, grad_x, grad_y, gradient_magnitude, extent, step_name)
         
         # 3D-Voxel-Visualisierung übersprungen (nicht mehr benötigt)
         
