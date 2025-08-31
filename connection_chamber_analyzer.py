@@ -638,6 +638,52 @@ def find_contours_with_connection_points(contours, vectors, extent, frame_width=
     
     return connection_contours
 
+def calculate_chamber_centers(connection_contours, extent, original_image_shape, frame_width=5):
+    """Berechnet die Mittelpunkte der Kammern mit Anschlusspunkten"""
+    chamber_centers = []
+    
+    # Koordinaten-Transformationsparameter
+    x_min, x_max, y_min, y_max = extent
+    old_height, old_width = original_image_shape[:2]
+    new_width = old_width + 2 * frame_width
+    new_height = old_height + 2 * frame_width
+    
+    # Pixel-zu-Koordinaten-Verhältnis
+    x_scale = (x_max - x_min) / old_width
+    y_scale = (y_max - y_min) / old_height
+    
+    print("Berechne Kammer-Mittelpunkte...")
+    
+    for conn in connection_contours:
+        contour = conn['contour']
+        vector = conn['vector']
+        
+        # Berechne Bounding Box Mittelpunkt (einfacher geometrischer Mittelpunkt)
+        x, y, w, h = cv2.boundingRect(contour)
+        
+        # Mittelpunkt der Bounding Box in Pixelkoordinaten
+        center_x_pixel = x + w // 2
+        center_y_pixel = y + h // 2
+        
+        # Transformiere zurück zu Weltkoordinaten
+        # Berücksichtige den frame_width Offset
+        world_x = x_min + (center_x_pixel - frame_width) * x_scale
+        world_y = y_min + (old_height - (center_y_pixel - frame_width) - 1) * y_scale
+        
+        center_info = {
+                'contour_index': conn['contour_index'],
+                'vector_id': vector['id'],
+                'center_world': {'x': world_x, 'y': world_y},
+                'center_pixel': (center_x_pixel, center_y_pixel),
+                'connection_point': vector['position']
+            }
+        
+        chamber_centers.append(center_info)
+        
+        print(f"  Kammer F{conn['contour_index']+1} (P{vector['id']}): Mittelpunkt = ({world_x:.6f}, {world_y:.6f})")
+    
+    return chamber_centers
+
 def save_contour_analysis(binary_image, contour_image, contours, hierarchy, extent, step_name, vectors=None, output_dir=None):
     """Speichert die Kontur-Analyse als Bilder"""
     print("Speichere Kontur-Analyse...")
@@ -650,6 +696,9 @@ def save_contour_analysis(binary_image, contour_image, contours, hierarchy, exte
     
     # Finde Konturen mit Anschlusspunkten
     connection_contours = find_contours_with_connection_points(filtered_contours, vectors, extent, frame_width=5, original_image_shape=binary_image.shape)
+    
+    # Berechne Mittelpunkte der Kammern mit Anschlusspunkten
+    chamber_centers = calculate_chamber_centers(connection_contours, extent, binary_image.shape, frame_width=5)
     
     # Erstelle sauberes gefiltertes Konturen-Bild (nur schwarzer Hintergrund)
     filtered_contour_image = np.zeros((completed_image.shape[0], completed_image.shape[1], 3), dtype=np.uint8)
@@ -743,6 +792,21 @@ def save_contour_analysis(binary_image, contour_image, contours, hierarchy, exte
             cy = int(M["m01"] / M["m00"])
             cv2.putText(connection_contour_image, f"C{conn_info['contour_index']+1}", (cx-10, cy), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
 
+    # Zeichne Anschlusspunkte als rote Kreise
+    for conn_info in connection_contours:
+        pixel_pos = conn_info['pixel_pos']
+        cv2.circle(connection_contour_image, pixel_pos, 3, (255, 255, 255), -1)  # Weißer Kreis
+        cv2.putText(connection_contour_image, f"P{conn_info['vector']['id']}", 
+                   (pixel_pos[0] + 5, pixel_pos[1] - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
+
+    # Zeichne Kammer-Mittelpunkte als gelbe Kreise
+    for center_info in chamber_centers:
+        center_pixel = center_info['center_pixel']
+        cv2.circle(connection_contour_image, center_pixel, 4, (0, 255, 255), -1)  # Gelber Kreis
+        cv2.circle(connection_contour_image, center_pixel, 6, (255, 255, 255), 2)  # Weißer Rand
+        cv2.putText(connection_contour_image, f"M{center_info['vector_id']}", 
+                   (center_pixel[0] + 8, center_pixel[1] - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
+
     # Erstelle kombinierte 4-Panel Visualisierung (2x2 Layout)
     fig, axes = plt.subplots(2, 2, figsize=(16, 12))
     
@@ -835,6 +899,13 @@ def save_contour_analysis(binary_image, contour_image, contours, hierarchy, exte
             contour_idx = conn_info['contour_index']
             vector_id = conn_info['vector']['id']
             stats_text += f"C{contour_idx+1}: Anschlusspunkt P{vector_id}\n"
+        stats_text += "\n"
+    
+    if chamber_centers:
+        stats_text += "Kammer-Mittelpunkte:\n"
+        for center_info in chamber_centers:
+            world_center = center_info['center_world']
+            stats_text += f"M{center_info['vector_id']}: ({world_center['x']:.4f}, {world_center['y']:.4f})\n"
         stats_text += "\n"
     
     if filtered_contours:
