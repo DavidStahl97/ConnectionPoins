@@ -594,8 +594,8 @@ def save_contour_analysis(binary_image, contour_image, contours, hierarchy, exte
     # Filtere verschachtelte Konturen mit OpenCV Hierarchie (verwende erweiterte Konturen)
     filtered_contours = filter_nested_contours_with_hierarchy(completed_contours, completed_hierarchy)
     
-    # Erstelle gefiltertes Konturen-Bild basierend auf vervollständigtem Bild
-    filtered_contour_image = cv2.cvtColor(completed_image, cv2.COLOR_GRAY2RGB)
+    # Erstelle sauberes gefiltertes Konturen-Bild (nur schwarzer Hintergrund)
+    filtered_contour_image = np.zeros((completed_image.shape[0], completed_image.shape[1], 3), dtype=np.uint8)
     
     colors = [
         (255, 0, 0),    # Rot
@@ -610,6 +610,9 @@ def save_contour_analysis(binary_image, contour_image, contours, hierarchy, exte
     
     for i, contour in enumerate(filtered_contours):
         color = colors[i % len(colors)]
+        # Zeichne Kontur als gefüllte Fläche (damit keine inneren Bereiche sichtbar sind)
+        cv2.fillPoly(filtered_contour_image, [contour], color)
+        # Zeichne zusätzlich Konturlinie für bessere Sichtbarkeit
         cv2.drawContours(filtered_contour_image, [contour], -1, color, 2)
         
         # Berechne Zentroid für Text-Position
@@ -681,9 +684,33 @@ def save_contour_analysis(binary_image, contour_image, contours, hierarchy, exte
             axes[0].plot(pos['x'], pos['y'], 'ro', markersize=5, markeredgecolor='white', markeredgewidth=1)
             axes[0].text(pos['x'], pos['y'], f"  P{vector['id']}", color='red', fontweight='bold', fontsize=8)
     
-    # Alle Konturen-Bild mitte (original)
-    axes[1].imshow(contour_image, extent=extent, origin='lower', interpolation='nearest')
-    axes[1].set_title(f'Ursprüngliche Konturen ({len(contours)})')
+    # Erstelle Konturen-Bild mit allen vervollständigten Konturen
+    all_completed_image = cv2.cvtColor(completed_image, cv2.COLOR_GRAY2RGB)
+    colors = [
+        (255, 0, 0),    # Rot
+        (0, 255, 0),    # Grün  
+        (0, 0, 255),    # Blau
+        (255, 255, 0),  # Gelb
+        (255, 0, 255),  # Magenta
+        (0, 255, 255),  # Cyan
+        (255, 128, 0),  # Orange
+        (128, 0, 255),  # Violett
+    ]
+    
+    for i, contour in enumerate(completed_contours):
+        color = colors[i % len(colors)]
+        cv2.drawContours(all_completed_image, [contour], -1, color, 2)
+        
+        # Berechne Zentroid für Text-Position
+        M = cv2.moments(contour)
+        if M["m00"] != 0:
+            cx = int(M["m10"] / M["m00"])
+            cy = int(M["m01"] / M["m00"])
+            cv2.putText(all_completed_image, f"A{i+1}", (cx-10, cy), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+
+    # Alle vervollständigten Konturen-Bild mitte
+    axes[1].imshow(all_completed_image, extent=new_extent, origin='lower', interpolation='nearest')
+    axes[1].set_title(f'Alle Vervollständigten ({len(completed_contours)})')
     axes[1].set_xlabel('X-Koordinate')  
     axes[1].set_ylabel('Y-Koordinate')
     
@@ -708,9 +735,10 @@ def save_contour_analysis(binary_image, contour_image, contours, hierarchy, exte
             axes[2].text(pos['x'], pos['y'], f"  P{vector['id']}", color='yellow', fontweight='bold', fontsize=8)
     
     # Kontur-Statistiken als Text
-    stats_text = f"Alle Konturen: {len(contours)}\n"
-    stats_text += f"Gefilterte Konturen: {len(filtered_contours)}\n"
-    stats_text += f"Entfernt (verschachtelt): {len(contours) - len(filtered_contours)}\n\n"
+    stats_text = f"Ursprüngliche Konturen: {len(contours)}\n"
+    stats_text += f"Vervollständigt: {len(completed_contours)}\n"
+    stats_text += f"Finale (gefiltert): {len(filtered_contours)}\n"
+    stats_text += f"Entfernt (verschachtelt): {len(completed_contours) - len(filtered_contours)}\n\n"
     
     if filtered_contours:
         stats_text += "Finale Konturen:\n"
