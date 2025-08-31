@@ -53,6 +53,41 @@ def load_json_vectors(json_file_path):
     
     return vectors
 
+def update_json_with_chamber_centers(json_file_path, vectors, chamber_centers):
+    """Aktualisiert die ursprüngliche JSON-Datei mit Kammer-Mittelpunkten"""
+    # Erstelle Mapping von vector_id zu chamber_center
+    centers_by_vector_id = {center['vector_id']: center for center in chamber_centers}
+    
+    # Erweitere jeden Vektor um den Kammer-Mittelpunkt
+    updated_vectors = []
+    for vector in vectors:
+        updated_vector = vector.copy()
+        
+        # Füge Kammer-Mittelpunkt hinzu falls verfügbar
+        if vector['id'] in centers_by_vector_id:
+            center_info = centers_by_vector_id[vector['id']]
+            if center_info['center_world_3d'] is not None:
+                updated_vector['chamber_center'] = center_info['center_world_3d']
+            else:
+                # Falls keine Z-Koordinate verfügbar, nutze 2D + NaN für Z
+                center_2d = center_info['center_world_2d']
+                updated_vector['chamber_center'] = {
+                    'x': center_2d['x'],
+                    'y': center_2d['y'], 
+                    'z': None  # Keine Z-Koordinate verfügbar
+                }
+    
+        updated_vectors.append(updated_vector)
+    
+    # Aktualisiere die ursprüngliche JSON-Datei
+    updated_data = {'connection_vectors': updated_vectors}
+    
+    with open(json_file_path, 'w', encoding='utf-8') as f:
+        json.dump(updated_data, f, indent=2, ensure_ascii=False)
+    
+    print(f"JSON-Datei aktualisiert mit Kammer-Mittelpunkten: {os.path.basename(json_file_path)}")
+    return json_file_path
+
 def mesh_to_voxels(mesh, voxel_resolution=50):
     """Konvertiert trimesh Mesh zu Open3D Voxel Grid"""
     print(f"Konvertiere Mesh zu Voxeln (Resolution: {voxel_resolution})")
@@ -638,8 +673,8 @@ def find_contours_with_connection_points(contours, vectors, extent, frame_width=
     
     return connection_contours
 
-def calculate_chamber_centers(connection_contours, extent, original_image_shape, frame_width=5):
-    """Berechnet die Mittelpunkte der Kammern mit Anschlusspunkten"""
+def calculate_chamber_centers(connection_contours, extent, original_image_shape, depth_image, frame_width=5):
+    """Berechnet die 3D-Mittelpunkte der Kammern mit Anschlusspunkten"""
     chamber_centers = []
     
     # Koordinaten-Transformationsparameter
@@ -665,26 +700,41 @@ def calculate_chamber_centers(connection_contours, extent, original_image_shape,
         center_x_pixel = x + w // 2
         center_y_pixel = y + h // 2
         
-        # Transformiere zurück zu Weltkoordinaten
-        # Berücksichtige den frame_width Offset
-        world_x = x_min + (center_x_pixel - frame_width) * x_scale
-        world_y = y_min + (old_height - (center_y_pixel - frame_width) - 1) * y_scale
+        # Transformiere zurück zu Weltkoordinaten (X, Y)
+        # Berücksichtige den frame_width Offset für die erweiterte Bildgröße
+        original_x_pixel = center_x_pixel - frame_width
+        original_y_pixel = center_y_pixel - frame_width
+        
+        world_x = x_min + original_x_pixel * x_scale
+        world_y = y_min + (old_height - original_y_pixel - 1) * y_scale
+        
+        # Extrahiere Z-Koordinate aus dem originalen Tiefenbild
+        world_z = None
+        if (0 <= original_x_pixel < old_width and 0 <= original_y_pixel < old_height):
+            # Tiefenbild ist (height, width) formatiert
+            depth_value = depth_image[original_y_pixel, original_x_pixel]
+            if not np.isnan(depth_value):
+                world_z = depth_value
         
         center_info = {
                 'contour_index': conn['contour_index'],
                 'vector_id': vector['id'],
-                'center_world': {'x': world_x, 'y': world_y},
+                'center_world_2d': {'x': world_x, 'y': world_y},
+                'center_world_3d': {'x': world_x, 'y': world_y, 'z': world_z} if world_z is not None else None,
                 'center_pixel': (center_x_pixel, center_y_pixel),
                 'connection_point': vector['position']
             }
         
         chamber_centers.append(center_info)
         
-        print(f"  Kammer F{conn['contour_index']+1} (P{vector['id']}): Mittelpunkt = ({world_x:.6f}, {world_y:.6f})")
+        if world_z is not None:
+            print(f"  Kammer F{conn['contour_index']+1} (P{vector['id']}): 3D-Mittelpunkt = ({world_x:.6f}, {world_y:.6f}, {world_z:.6f})")
+        else:
+            print(f"  Kammer F{conn['contour_index']+1} (P{vector['id']}): 2D-Mittelpunkt = ({world_x:.6f}, {world_y:.6f}) [Keine Z-Koordinate verfügbar]")
     
     return chamber_centers
 
-def save_contour_analysis(binary_image, contour_image, contours, hierarchy, extent, step_name, vectors=None, output_dir=None):
+def save_contour_analysis(binary_image, contour_image, contours, hierarchy, extent, step_name, depth_image, json_file_path=None, vectors=None, output_dir=None):
     """Speichert die Kontur-Analyse als Bilder"""
     print("Speichere Kontur-Analyse...")
     
@@ -698,7 +748,7 @@ def save_contour_analysis(binary_image, contour_image, contours, hierarchy, exte
     connection_contours = find_contours_with_connection_points(filtered_contours, vectors, extent, frame_width=5, original_image_shape=binary_image.shape)
     
     # Berechne Mittelpunkte der Kammern mit Anschlusspunkten
-    chamber_centers = calculate_chamber_centers(connection_contours, extent, binary_image.shape, frame_width=5)
+    chamber_centers = calculate_chamber_centers(connection_contours, extent, binary_image.shape, depth_image, frame_width=5)
     
     # Erstelle sauberes gefiltertes Konturen-Bild (nur schwarzer Hintergrund)
     filtered_contour_image = np.zeros((completed_image.shape[0], completed_image.shape[1], 3), dtype=np.uint8)
@@ -899,8 +949,12 @@ def save_contour_analysis(binary_image, contour_image, contours, hierarchy, exte
     if chamber_centers:
         stats_text += "Kammer-Mittelpunkte:\n"
         for center_info in chamber_centers:
-            world_center = center_info['center_world']
-            stats_text += f"M{center_info['vector_id']}: ({world_center['x']:.4f}, {world_center['y']:.4f})\n"
+            if center_info['center_world_3d'] is not None:
+                center_3d = center_info['center_world_3d']
+                stats_text += f"M{center_info['vector_id']}: ({center_3d['x']:.4f}, {center_3d['y']:.4f}, {center_3d['z']:.4f})\n"
+            else:
+                center_2d = center_info['center_world_2d']
+                stats_text += f"M{center_info['vector_id']}: ({center_2d['x']:.4f}, {center_2d['y']:.4f}, ?) 2D only\n"
         stats_text += "\n"
     
     if filtered_contours:
@@ -922,6 +976,13 @@ def save_contour_analysis(binary_image, contour_image, contours, hierarchy, exte
     plt.savefig(combined_contour_filename, dpi=150, bbox_inches='tight')
     plt.close()
     print(f"Kombinierte Kontur-Analyse gespeichert: {combined_contour_filename}")
+    
+    # Aktualisiere ursprüngliche JSON mit Kammer-Mittelpunkten
+    if json_file_path and vectors and chamber_centers:
+        try:
+            update_json_with_chamber_centers(json_file_path, vectors, chamber_centers)
+        except Exception as e:
+            print(f"Warnung: Konnte JSON nicht mit Kammer-Mittelpunkten aktualisieren: {e}")
     
     # Detaillierte Kontur-Informationen ausgeben
     print("Alle Konturen:")
@@ -1188,7 +1249,7 @@ def process_step_file(step_file):
                 
                 # Speichere Kontur-Analyse
                 if contour_image is not None:
-                    save_contour_analysis(binary_image, contour_image, contours, hierarchy, extent, step_name, vectors, output_dir)
+                    save_contour_analysis(binary_image, contour_image, contours, hierarchy, extent, step_name, depth_image, json_file, vectors, output_dir)
         
         print(f"[OK] Erfolgreich verarbeitet: {os.path.basename(step_file)}")
         return True

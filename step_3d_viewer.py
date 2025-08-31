@@ -30,8 +30,10 @@ class STEP3DViewer(QOpenGLWidget):
         self.mesh_faces = None
         self.selected_vectors = []
         self.vector_markers = []
+        self.chamber_centers = []  # Neue Liste für Kammer-Mittelpunkte
         self.show_mesh = True
         self.show_coordinate_system = True  # Zeige Weltkoordinatensystem
+        self.show_chamber_centers = True  # Zeige Kammer-Mittelpunkte
         self.original_vertices = None  # Backup der ursprünglichen Vertices
         
         # Kamera-Parameter
@@ -186,6 +188,10 @@ class STEP3DViewer(QOpenGLWidget):
         # Zeichne ausgewählte Vektoren als Pfeile
         self.draw_vectors()
         
+        # Zeichne Kammer-Mittelpunkte
+        if self.show_chamber_centers:
+            self.draw_chamber_centers()
+        
         # Zeichne Weltkoordinatensystem
         if self.show_coordinate_system:
             self.draw_world_coordinate_system()
@@ -278,6 +284,70 @@ class STEP3DViewer(QOpenGLWidget):
             self.draw_arrow(normalized_start, normalized_end, direction)
         
         glEnable(GL_LIGHTING)
+        
+    def draw_chamber_centers(self):
+        """Zeichnet die Kammer-Mittelpunkte als Kugeln"""
+        if not self.chamber_centers:
+            return
+            
+        glDisable(GL_LIGHTING)
+        
+        for i, center_data in enumerate(self.chamber_centers):
+            center_point = center_data['position']
+            
+            # Transformiere Punkt in normalisierte Koordinaten für das Rendering
+            if hasattr(self, 'mesh_center') and hasattr(self, 'mesh_scale'):
+                normalized_center = [(center_point[j] - self.mesh_center[j]) / self.mesh_scale for j in range(3)]
+            else:
+                normalized_center = center_point
+            
+            # Zeichne Kugel für Kammer-Mittelpunkt
+            self.draw_sphere(normalized_center, 0.01, (1.0, 1.0, 0.0))  # Gelbe Kugel
+        
+        glEnable(GL_LIGHTING)
+        
+    def draw_sphere(self, center, radius, color):
+        """Zeichnet eine Kugel an der gegebenen Position"""
+        glColor3f(color[0], color[1], color[2])
+        glPushMatrix()
+        glTranslatef(center[0], center[1], center[2])
+        
+        # Zeichne Kugel mit OpenGL Quadrics
+        import math
+        slices = 12
+        stacks = 8
+        
+        glBegin(GL_TRIANGLES)
+        for i in range(stacks):
+            lat0 = math.pi * (-0.5 + float(i) / stacks)
+            z0 = math.sin(lat0) * radius
+            zr0 = math.cos(lat0) * radius
+            
+            lat1 = math.pi * (-0.5 + float(i + 1) / stacks)
+            z1 = math.sin(lat1) * radius
+            zr1 = math.cos(lat1) * radius
+            
+            for j in range(slices):
+                lng = 2 * math.pi * float(j) / slices
+                x = math.cos(lng)
+                y = math.sin(lng)
+                
+                lng1 = 2 * math.pi * float(j + 1) / slices
+                x1 = math.cos(lng1)
+                y1 = math.sin(lng1)
+                
+                # Erstes Dreieck
+                glVertex3f(x * zr0, y * zr0, z0)
+                glVertex3f(x * zr1, y * zr1, z1)
+                glVertex3f(x1 * zr0, y1 * zr0, z0)
+                
+                # Zweites Dreieck
+                glVertex3f(x1 * zr0, y1 * zr0, z0)
+                glVertex3f(x * zr1, y * zr1, z1)
+                glVertex3f(x1 * zr1, y1 * zr1, z1)
+        glEnd()
+        
+        glPopMatrix()
         
     def draw_cube(self, center, size):
         """Zeichnet einen Würfel an der gegebenen Position"""
@@ -765,8 +835,9 @@ class STEP3DViewer(QOpenGLWidget):
         return point
         
     def clear_points(self):
-        """Löscht alle ausgewählten Vektoren"""
+        """Löscht alle ausgewählten Vektoren und Kammer-Mittelpunkte"""
         self.selected_vectors.clear()
+        self.chamber_centers.clear()
         self.update()
         
     def get_points(self):
@@ -1028,7 +1099,7 @@ class STEP3DMainWindow(QMainWindow):
         with open(json_filepath, 'r', encoding='utf-8') as f:
             data = json.load(f)
             
-        # Lösche alte Vektoren
+        # Lösche alte Vektoren und Kammer-Mittelpunkte
         self.clear_points()
         
         # Lade Vektoren
@@ -1052,6 +1123,20 @@ class STEP3DMainWindow(QMainWindow):
                 
                 # Füge zum Viewer hinzu
                 self.viewer.selected_vectors.append(viewer_vector)
+                
+                # Lade Kammer-Mittelpunkt falls vorhanden
+                if 'chamber_center' in vector_data and vector_data['chamber_center'] is not None:
+                    chamber_center = vector_data['chamber_center']
+                    if chamber_center['z'] is not None:  # Nur wenn 3D-Koordinaten verfügbar
+                        center_data = {
+                            'position': [
+                                chamber_center['x'],
+                                chamber_center['y'],
+                                chamber_center['z']
+                            ],
+                            'vector_id': vector_data['id']
+                        }
+                        self.viewer.chamber_centers.append(center_data)
                 
                 # Füge zu selected_points hinzu (für das Speichern)
                 self.selected_points.append(vector_data)
@@ -1100,11 +1185,11 @@ class STEP3DMainWindow(QMainWindow):
             self.statusBar().showMessage(f"Vektor {vector_id} hinzugefügt - {len(self.selected_points)} Vektoren total")
         
     def clear_points(self):
-        """Löscht alle Vektoren"""
+        """Löscht alle Vektoren und Kammer-Mittelpunkte"""
         self.selected_points.clear()
         self.points_list.clear()
         self.viewer.clear_points()
-        self.statusBar().showMessage("Alle Vektoren gelöscht")
+        self.statusBar().showMessage("Alle Vektoren und Kammer-Mittelpunkte gelöscht")
         
     def save_points(self):
         """Speichert die Vektoren in JSON-Datei mit gleichem Namen wie STEP-Datei"""
