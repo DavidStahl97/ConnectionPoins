@@ -584,6 +584,54 @@ def complete_individual_cut_contours(binary_image, contours, frame_width=3):
     
     return completed_image, new_contours, new_hierarchy
 
+def find_contours_with_connection_points(contours, vectors, extent, frame_width=5):
+    """Findet Konturen, die Anschlusspunkte enthalten"""
+    if not vectors:
+        return []
+    
+    connection_contours = []
+    
+    # Berechne Koordinaten-Transformationen für erweiterten Bereich
+    x_min, x_max, y_min, y_max = extent
+    old_width = 401  # Aus der Tiefenbild-Auflösung bekannt 
+    old_height = 43
+    new_width = old_width + 2 * frame_width
+    new_height = old_height + 2 * frame_width
+    
+    # Pixel-zu-Koordinaten-Verhältnis
+    x_scale = (x_max - x_min) / old_width
+    y_scale = (y_max - y_min) / old_height
+    
+    print("Prüfe Anschlusspunkte in Konturen...")
+    
+    for vector in vectors:
+        pos = vector['position']
+        # Transformiere Weltkoordinaten zu Pixelkoordinaten (erweitert)
+        pixel_x = int((pos['x'] - x_min) / x_scale) + frame_width
+        # Y-Koordinate invertieren, da Bilder Y=0 oben haben, aber unsere Darstellung Y=0 unten hat
+        pixel_y = (new_height - 1) - int((pos['y'] - y_min) / y_scale) - frame_width
+        
+        print(f"  Anschlusspunkt P{vector['id']}: ({pos['x']:.6f}, {pos['y']:.6f}) -> Pixel ({pixel_x}, {pixel_y})")
+        
+        # Prüfe alle Konturen (teste ob Punkt innerhalb der gefüllten Kontur liegt)
+        for contour_idx, contour in enumerate(contours):
+            # OpenCV pointPolygonTest: >0 = innen, <0 = außen, =0 = auf Rand
+            result = cv2.pointPolygonTest(contour, (float(pixel_x), float(pixel_y)), False)
+            print(f"    -> Kontur F{contour_idx+1}: pointPolygonTest = {result:.3f}")
+            if result > 0:  # Punkt ist innerhalb der Kontur (nicht auf dem Rand)
+                connection_contours.append({
+                    'contour_index': contour_idx,
+                    'contour': contour,
+                    'vector': vector,
+                    'pixel_pos': (pixel_x, pixel_y)
+                })
+                print(f"    -> GEFUNDEN innerhalb Kontur F{contour_idx+1}")
+                break
+        else:
+            print(f"    -> Nicht innerhalb einer Kontur gefunden")
+    
+    return connection_contours
+
 def save_contour_analysis(binary_image, contour_image, contours, hierarchy, extent, step_name, vectors=None, output_dir=None):
     """Speichert die Kontur-Analyse als Bilder"""
     print("Speichere Kontur-Analyse...")
@@ -593,6 +641,9 @@ def save_contour_analysis(binary_image, contour_image, contours, hierarchy, exte
     
     # Filtere verschachtelte Konturen mit OpenCV Hierarchie (verwende erweiterte Konturen)
     filtered_contours = filter_nested_contours_with_hierarchy(completed_contours, completed_hierarchy)
+    
+    # Finde Konturen mit Anschlusspunkten
+    connection_contours = find_contours_with_connection_points(filtered_contours, vectors, extent, frame_width=5)
     
     # Erstelle sauberes gefiltertes Konturen-Bild (nur schwarzer Hintergrund)
     filtered_contour_image = np.zeros((completed_image.shape[0], completed_image.shape[1], 3), dtype=np.uint8)
@@ -668,21 +719,39 @@ def save_contour_analysis(binary_image, contour_image, contours, hierarchy, exte
         y_max + frame_width * y_scale   # y_max
     ]
     
-    # Erstelle kombinierte 3-Panel Visualisierung
-    fig, axes = plt.subplots(1, 3, figsize=(22, 6))
+    # Erstelle 4. Panel mit Konturen die Anschlusspunkte enthalten
+    connection_contour_image = np.zeros((completed_image.shape[0], completed_image.shape[1], 3), dtype=np.uint8)
     
-    # Ursprüngliches Binärbild links
-    axes[0].imshow(binary_image, extent=extent, origin='lower', cmap='gray', interpolation='nearest')
-    axes[0].set_title('Ursprüngliches Binärbild')
-    axes[0].set_xlabel('X-Koordinate')
-    axes[0].set_ylabel('Y-Koordinate')
+    for conn_info in connection_contours:
+        contour = conn_info['contour']
+        color = colors[conn_info['contour_index'] % len(colors)]
+        # Zeichne Kontur als gefüllte Fläche
+        cv2.fillPoly(connection_contour_image, [contour], color)
+        # Zeichne Konturlinie
+        cv2.drawContours(connection_contour_image, [contour], -1, color, 2)
+        
+        # Berechne Zentroid für Text-Position
+        M = cv2.moments(contour)
+        if M["m00"] != 0:
+            cx = int(M["m10"] / M["m00"])
+            cy = int(M["m01"] / M["m00"])
+            cv2.putText(connection_contour_image, f"C{conn_info['contour_index']+1}", (cx-10, cy), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+
+    # Erstelle kombinierte 4-Panel Visualisierung (2x2 Layout)
+    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+    
+    # Panel 1 (oben links): Ursprüngliches Binärbild 
+    axes[0,0].imshow(binary_image, extent=extent, origin='lower', cmap='gray', interpolation='nearest')
+    axes[0,0].set_title('Ursprüngliches Binärbild')
+    axes[0,0].set_xlabel('X-Koordinate')
+    axes[0,0].set_ylabel('Y-Koordinate')
     
     # Anschlusspunkte im Binärbild
     if vectors:
         for vector in vectors:
             pos = vector['position']
-            axes[0].plot(pos['x'], pos['y'], 'ro', markersize=5, markeredgecolor='white', markeredgewidth=1)
-            axes[0].text(pos['x'], pos['y'], f"  P{vector['id']}", color='red', fontweight='bold', fontsize=8)
+            axes[0,0].plot(pos['x'], pos['y'], 'ro', markersize=5, markeredgecolor='white', markeredgewidth=1)
+            axes[0,0].text(pos['x'], pos['y'], f"  P{vector['id']}", color='red', fontweight='bold', fontsize=8)
     
     # Erstelle Konturen-Bild mit allen vervollständigten Konturen
     all_completed_image = cv2.cvtColor(completed_image, cv2.COLOR_GRAY2RGB)
@@ -708,47 +777,69 @@ def save_contour_analysis(binary_image, contour_image, contours, hierarchy, exte
             cy = int(M["m01"] / M["m00"])
             cv2.putText(all_completed_image, f"A{i+1}", (cx-10, cy), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
 
-    # Alle vervollständigten Konturen-Bild mitte
-    axes[1].imshow(all_completed_image, extent=new_extent, origin='lower', interpolation='nearest')
-    axes[1].set_title(f'Alle Vervollständigten ({len(completed_contours)})')
-    axes[1].set_xlabel('X-Koordinate')  
-    axes[1].set_ylabel('Y-Koordinate')
+    # Panel 2 (oben rechts): Alle vervollständigten Konturen
+    axes[0,1].imshow(all_completed_image, extent=new_extent, origin='lower', interpolation='nearest')
+    axes[0,1].set_title(f'Alle Vervollständigten ({len(completed_contours)})')
+    axes[0,1].set_xlabel('X-Koordinate')  
+    axes[0,1].set_ylabel('Y-Koordinate')
     
     # Anschlusspunkte im Konturen-Bild
     if vectors:
         for vector in vectors:
             pos = vector['position']
-            axes[1].plot(pos['x'], pos['y'], 'yo', markersize=5, markeredgecolor='black', markeredgewidth=1)
-            axes[1].text(pos['x'], pos['y'], f"  P{vector['id']}", color='yellow', fontweight='bold', fontsize=8)
+            axes[0,1].plot(pos['x'], pos['y'], 'yo', markersize=5, markeredgecolor='black', markeredgewidth=1)
+            axes[0,1].text(pos['x'], pos['y'], f"  P{vector['id']}", color='yellow', fontweight='bold', fontsize=8)
     
-    # Erweiterte und gefilterte Konturen-Bild rechts
-    axes[2].imshow(filtered_contour_image, extent=new_extent, origin='lower', interpolation='nearest')
-    axes[2].set_title(f'Erweitert & Gefiltert ({len(filtered_contours)} final)')
-    axes[2].set_xlabel('X-Koordinate')  
-    axes[2].set_ylabel('Y-Koordinate')
+    # Panel 3 (unten links): Erweiterte und gefilterte Konturen
+    axes[1,0].imshow(filtered_contour_image, extent=new_extent, origin='lower', interpolation='nearest')
+    axes[1,0].set_title(f'Erweitert & Gefiltert ({len(filtered_contours)} final)')
+    axes[1,0].set_xlabel('X-Koordinate')  
+    axes[1,0].set_ylabel('Y-Koordinate')
     
     # Anschlusspunkte im erweiterten Konturen-Bild
     if vectors:
         for vector in vectors:
             pos = vector['position']
-            axes[2].plot(pos['x'], pos['y'], 'yo', markersize=5, markeredgecolor='black', markeredgewidth=1)
-            axes[2].text(pos['x'], pos['y'], f"  P{vector['id']}", color='yellow', fontweight='bold', fontsize=8)
+            axes[1,0].plot(pos['x'], pos['y'], 'yo', markersize=5, markeredgecolor='black', markeredgewidth=1)
+            axes[1,0].text(pos['x'], pos['y'], f"  P{vector['id']}", color='yellow', fontweight='bold', fontsize=8)
+    
+    # Panel 4 (unten rechts): Konturen mit Anschlusspunkten
+    axes[1,1].imshow(connection_contour_image, extent=new_extent, origin='lower', interpolation='nearest')
+    axes[1,1].set_title(f'Konturen mit Anschlusspunkten ({len(connection_contours)})')
+    axes[1,1].set_xlabel('X-Koordinate')  
+    axes[1,1].set_ylabel('Y-Koordinate')
+    
+    # Anschlusspunkte hervorheben
+    if vectors:
+        for vector in vectors:
+            pos = vector['position']
+            axes[1,1].plot(pos['x'], pos['y'], 'wo', markersize=7, markeredgecolor='red', markeredgewidth=2)
+            axes[1,1].text(pos['x'], pos['y'], f"  P{vector['id']}", color='white', fontweight='bold', fontsize=10)
     
     # Kontur-Statistiken als Text
     stats_text = f"Ursprüngliche Konturen: {len(contours)}\n"
     stats_text += f"Vervollständigt: {len(completed_contours)}\n"
     stats_text += f"Finale (gefiltert): {len(filtered_contours)}\n"
+    stats_text += f"Mit Anschlusspunkten: {len(connection_contours)}\n"
     stats_text += f"Entfernt (verschachtelt): {len(completed_contours) - len(filtered_contours)}\n\n"
+    
+    if connection_contours:
+        stats_text += "Konturen mit Anschlusspunkten:\n"
+        for conn_info in connection_contours:
+            contour_idx = conn_info['contour_index']
+            vector_id = conn_info['vector']['id']
+            stats_text += f"C{contour_idx+1}: Anschlusspunkt P{vector_id}\n"
+        stats_text += "\n"
     
     if filtered_contours:
         stats_text += "Finale Konturen:\n"
-        for i, contour in enumerate(filtered_contours[:5]):  # Zeige nur erste 5 gefilterte Konturen
+        for i, contour in enumerate(filtered_contours[:3]):  # Zeige nur erste 3 für Platz
             area = cv2.contourArea(contour)
             perimeter = cv2.arcLength(contour, True)
             stats_text += f"F{i+1}: Area={area:.0f}, Umfang={perimeter:.1f}\n"
         
-        if len(filtered_contours) > 5:
-            stats_text += f"... und {len(filtered_contours)-5} weitere"
+        if len(filtered_contours) > 3:
+            stats_text += f"... und {len(filtered_contours)-3} weitere"
     else:
         stats_text += "Keine finalen Konturen"
             
