@@ -1,6 +1,6 @@
-# STEP 3D Viewer & Connection Chamber Analyzer - Connection Points
+# STEP-Anschlussengineering: Automatische Kammer-Öffnungs-Erkennung
 
-Dieses Repository enthält zwei spezialisierte Python-Anwendungen für die Arbeit mit STEP-Dateien und 3D-Geometrie-Analyse:
+Dieses Repository enthält spezialisierte Python-Anwendungen für das **Anschlussengineering** - die präzise Erkennung und Analyse von Kammer-Öffnungen in 3D-CAD-Bauteilen. Das Hauptziel ist die **automatische Lokalisierung von Anschlussstellen** und deren **geometrischen Kammern** für Engineering-Anwendungen.
 
 ## 📋 Programme im Überblick
 
@@ -22,55 +22,86 @@ PyQt6-basierte 3D-Viewer-Anwendung für STEP-Dateien mit folgenden Hauptfunktion
 - **JSON-Export**: Speicherung der Anschlussvektoren mit Position und Richtung
 - **Performance-Optimierung**: Display Lists und Vertex Arrays für flüssiges Rendering
 
-### 2. **connection_chamber_analyzer.py** - Anschlusspunkt-Kammer-Analyse
-Kommandozeilen-basiertes Tool zur intelligenten Erkennung und Zuordnung von Anschlusspunkten zu geometrischen Kammern:
+### 2. **connection_chamber_analyzer.py** - Intelligente Kammer-Öffnungs-Erkennung
+Das Herzstück des Anschlussengineerings: Vollautomatische Erkennung von Kammer-Öffnungen und deren geometrischen Eigenschaften.
 
-**🔧 Kernfunktionalitäten:**
-- **Kammer-Erkennung**: Automatische Identifikation geschlossener Bereiche durch Kontur-Analyse
-- **Anschlusspunkt-Zuordnung**: Präzise Bestimmung welcher Anschlusspunkt in welcher Kammer liegt
-- **Intelligente Konturen-Vervollständigung**: Schließt abgeschnittene Kanten durch Rahmen-Erweiterung
-- **Hierarchische Filterung**: Entfernt verschachtelte Konturen zur Fokussierung auf Hauptkammern
+**🎯 Hauptziel: Kammer-Öffnungs-Erkennung**
+- **Automatische Öffnungs-Detektion**: Erkennt Kammer-Eingangsöffnungen in STEP-Bauteilen
+- **3D-Kammer-Mittelpunkte**: Berechnet präzise Mittelpunkte und Tiefen der erkannten Kammern
+- **Anschluss-Zuordnung**: Ordnet jeden Anschlusspunkt seiner entsprechenden Kammer zu
+- **Geometrische Analyse**: Liefert quantitative Daten für Engineering-Berechnungen
 
-**📈 Analysefunktionen:**
-- **4-Panel Visualisierung**: Vollständige Pipeline-Darstellung von Binärbild bis zur finalen Kammer-Zuordnung
-- **OpenCV Kontur-Erkennung**: Robuste Identifikation zusammenhängender Bereiche mittels Gradientenanalyse
-- **Batch-Verarbeitung**: Automatische Analyse aller STEP-Dateien im Data-Ordner
-- **Detaillierte Statistiken**: Quantitative Auswertung der Kammer-Anschlusspunkt-Zuordnungen
+**🔧 Technische Funktionen:**
+- **Voxel-basierte Tiefenbild-Analyse**: Hochauflösende 3D-zu-2D-Projektion (800x Resolution)
+- **Kontur-Erkennung mit OpenCV**: Robuste Identifikation von Kammer-Umrissen mittels Gradientenanalyse  
+- **Intelligente Kantenvervollständigung**: Schließt abgeschnittene Kammer-Konturen automatisch
+- **Hierarchische Filterung**: Eliminiert verschachtelte Bereiche zur Fokussierung auf Hauptkammern
 
-## 💾 Datenstrukturen
+**📊 Engineering-Ausgaben:**
+- **4-Panel Visualisierung**: Vollständige Analyse-Pipeline von Tiefenbild bis Kammer-Zuordnung
+- **3D-Koordinaten**: Präzise X/Y/Z-Koordinaten der Kammer-Mittelpunkte und -Tiefen
+- **JSON-Integration**: Erweitert Anschlussdaten um `chamber_center` für nahtlose Weiterverwendung
+- **Batch-Verarbeitung**: Automatische Analyse ganzer STEP-Datei-Bibliotheken
+
+## 💾 Anschlussengineering-Datenstrukturen
+Das System generiert erweiterte JSON-Daten mit automatisch erkannten Kammer-Mittelpunkten:
+
 ```json
 {
   "connection_vectors": [
     {
       "id": 1,
-      "position": {"x": 0.1234, "y": 0.5678, "z": 0.9012},
-      "direction": {"x": 0.577, "y": 0.577, "z": 0.577}
+      "position": {"x": 0.002147, "y": 0.043655, "z": 0.017129},
+      "direction": {"x": 0.0, "y": 0.0, "z": 1.0},
+      "chamber_center": {"x": 0.002822, "y": 0.042836, "z": 0.035235}
+    },
+    {
+      "id": 2, 
+      "position": {"x": 0.002242, "y": 0.004457, "z": 0.018983},
+      "direction": {"x": 0.0, "y": 0.0, "z": 1.0},
+      "chamber_center": {"x": 0.002822, "y": 0.005582, "z": 0.035235}
     }
   ]
 }
 ```
 
-## 🚀 Verwendung
+**Datenerklärung:**
+- **`position`**: Anschlusspunkt-Koordinaten (manuell definiert)
+- **`direction`**: Richtungsvektor des Anschlusses
+- **`chamber_center`**: **Automatisch erkannter Kammer-Mittelpunkt** mit maximaler Tiefe
+- **Engineering-Nutzen**: Vollständige geometrische Definition für Anschluss-Berechnungen
 
-### step_3d_viewer.py
+## 🚀 Anschlussengineering-Workflow
+
+### 1. Anschlusspunkt-Definition mit step_3d_viewer.py
 ```bash
 python step_3d_viewer.py
 ```
-Ermöglicht es Ingenieuren, 3D-Modelle aus STEP-Dateien zu laden und präzise Anschlusspunkte mit zugehörigen Richtungsvektoren interaktiv zu definieren.
+**Interaktive Anschlusspunkt-Erstellung:**
+- Lädt STEP-Bauteile und ermöglicht das Klicken auf Anschlussstellen
+- Generiert automatisch Richtungsvektoren basierend auf der Kameraposition  
+- Exportiert Anschlussdaten als JSON zur Weiterverarbeitung
 
-### connection_chamber_analyzer.py
+### 2. Automatische Kammer-Öffnungs-Erkennung mit connection_chamber_analyzer.py
 ```bash
-# Batch-Analyse aller STEP-Dateien im Data-Ordner
+# Batch-Analyse aller STEP-Dateien im Data-Ordner (empfohlen)
 python connection_chamber_analyzer.py
 
-# Mit einzelner STEP-Datei als Argument
+# Einzelne STEP-Datei analysieren
 python connection_chamber_analyzer.py model.stp
 ```
-Analysiert die geometrischen Kammern in STEP-Dateien und ordnet Anschlusspunkte den entsprechenden Kammern zu. Erstellt dabei folgende Ausgabedateien:
-- `{filename}_contours_analysis.png` - 4-Panel Visualisierung der Kammer-Analyse-Pipeline
-- `{filename}_contours_filtered.png` - Finale Kammern ohne verschachtelte Bereiche
-- `{filename}_depth_image.png` - Tiefenbild mit Anschlusspunkt-Markierungen
-- `{filename}_gradient_magnitude.png` - Gradientenanalyse für Kammer-Erkennung
+**Das Herzstück des Anschlussengineerings:**
+- **Erkennt automatisch Kammer-Öffnungen** in den STEP-Bauteilen
+- **Berechnet 3D-Kammer-Mittelpunkte** mit maximaler Tiefe (Z-Koordinate)
+- **Erweitert JSON-Daten** um `chamber_center` für jeden Anschlusspunkt
+- **Visualisiert Erkennungs-Pipeline** in detaillierten Analyse-Grafiken
+
+**Generierte Ausgabedateien:**
+- `{filename}_contours_analysis.png` - **Hauptergebnis**: 4-Panel Kammer-Erkennungs-Pipeline
+- `{filename}_contours_filtered.png` - Finale erkannte Kammern ohne Verschachtelungen
+- `{filename}_depth_image.png` - Hochauflösendes Tiefenbild (800x Resolution)
+- `{filename}_gradient_magnitude.png` - Gradientenanalyse zur Kammer-Detektion
+- **Erweiterte `{filename}.json`** - Anschlussdaten + automatisch erkannte Kammer-Mittelpunkte
 
 ## 🔧 Setup
 ```bash
