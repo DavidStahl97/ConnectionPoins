@@ -408,7 +408,7 @@ def visualize_depth_gradients(depth_image, grad_x, grad_y, gradient_magnitude, e
     plt.savefig(combined_filename, dpi=150, bbox_inches='tight')
     print(f"Kombinierte Analyse gespeichert: {combined_filename}")
     
-    plt.show()
+    # plt.show()  # Deaktiviert für Batch-Verarbeitung
     
     # Speichere auch Gradientenbilder
     plt.figure(figsize=(10, 8))
