@@ -708,13 +708,25 @@ def calculate_chamber_centers(connection_contours, extent, original_image_shape,
         world_x = x_min + original_x_pixel * x_scale
         world_y = y_min + (old_height - original_y_pixel - 1) * y_scale
         
-        # Extrahiere Z-Koordinate aus dem originalen Tiefenbild
+        # Extrahiere Z-Koordinate vom Rand der Kammer (minimale Tiefe der Kontur)
         world_z = None
-        if (0 <= original_x_pixel < old_width and 0 <= original_y_pixel < old_height):
-            # Tiefenbild ist (height, width) formatiert
-            depth_value = depth_image[original_y_pixel, original_x_pixel]
-            if not np.isnan(depth_value):
-                world_z = depth_value
+        contour_depths = []
+        
+        # Sammle alle Tiefenwerte entlang der Kontur-Punkte
+        for point in contour:
+            # Kontur-Punkt in originale Bildkoordinaten transformieren
+            contour_x_pixel = int(point[0][0]) - frame_width
+            contour_y_pixel = int(point[0][1]) - frame_width
+            
+            if (0 <= contour_x_pixel < old_width and 0 <= contour_y_pixel < old_height):
+                depth_value = depth_image[contour_y_pixel, contour_x_pixel]
+                if not np.isnan(depth_value):
+                    contour_depths.append(depth_value)
+        
+        # Verwende die minimale Tiefe (der Rand/Anfang der Kammer)
+        if contour_depths:
+            world_z = min(contour_depths)
+            print(f"    -> Kontur-Tiefenwerte: {len(contour_depths)} Punkte, Min={world_z:.6f}, Max={max(contour_depths):.6f}")
         
         center_info = {
                 'contour_index': conn['contour_index'],
