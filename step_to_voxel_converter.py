@@ -452,15 +452,150 @@ def filter_nested_contours_with_hierarchy(contours, hierarchy):
     
     return filtered_contours
 
+def complete_individual_cut_contours(binary_image, contours, frame_width=3):
+    """
+    Vervollständigt einzelne abgeschnittene Konturen durch Hinzufügen eines Rahmens
+    und Verbindung nur derjenigen Randpunkte, die zur selben Kontur gehören
+    
+    Args:
+        binary_image: Ursprüngliches Binärbild
+        contours: Liste der erkannten Konturen
+        frame_width: Breite des hinzuzufügenden Rahmens
+    
+    Returns:
+        completed_image: Erweitertes Binärbild mit vervollständigten Konturen
+        new_contours: Neu erkannte Konturen im erweiterten Bild
+    """
+    print(f"Vervollständige einzelne abgeschnittene Konturen (Rahmen: {frame_width} Pixel)...")
+    
+    old_height, old_width = binary_image.shape
+    
+    # Erstelle erweitertes Bild mit Rahmen
+    new_height = old_height + 2 * frame_width
+    new_width = old_width + 2 * frame_width
+    
+    # Neues Bild mit schwarzem Rahmen erstellen
+    completed_image = np.zeros((new_height, new_width), dtype=np.uint8)
+    
+    # Ursprüngliches Bild in die Mitte setzen
+    completed_image[frame_width:frame_width + old_height, 
+                   frame_width:frame_width + old_width] = binary_image
+    
+    connections_made = 0
+    completed_contours = 0
+    
+    # Prüfe jede Kontur einzeln auf Randabschnitte
+    for contour_idx, contour in enumerate(contours):
+        # Finde alle Randpunkte dieser spezifischen Kontur
+        edge_points_per_side = {
+            'oben': [],     # y = 0
+            'unten': [],    # y = old_height - 1  
+            'links': [],    # x = 0
+            'rechts': []    # x = old_width - 1
+        }
+        
+        for point in contour:
+            x, y = point[0]  # OpenCV Kontur-Format
+            
+            # Prüfe ob Punkt am ursprünglichen Rand lag
+            if y == 0:  # Oberer Rand
+                edge_points_per_side['oben'].append((x + frame_width, y + frame_width))
+            elif y == old_height - 1:  # Unterer Rand  
+                edge_points_per_side['unten'].append((x + frame_width, y + frame_width))
+                
+            if x == 0:  # Linker Rand
+                edge_points_per_side['links'].append((x + frame_width, y + frame_width))
+            elif x == old_width - 1:  # Rechter Rand
+                edge_points_per_side['rechts'].append((x + frame_width, y + frame_width))
+        
+        # Vervollständige nur diese Kontur, wenn sie Randpunkte hat
+        contour_was_completed = False
+        
+        for edge_name, points in edge_points_per_side.items():
+            if len(points) >= 2:
+                print(f"  Kontur C{contour_idx+1}: Vervollständige {len(points)} Punkte am {edge_name}en Rand")
+                contour_was_completed = True
+                
+                if edge_name == 'oben':
+                    # Verbinde über die oberste Rahmenlinie
+                    y_line = frame_width - 1
+                    points.sort()  # Nach X sortieren
+                    x1, _ = points[0]   # Erster Punkt
+                    x2, _ = points[-1]  # Letzter Punkt
+                    
+                    # Verbindung nur zwischen erstem und letztem Punkt dieser Kontur
+                    completed_image[y_line, x1:x2+1] = 255
+                    # Verbindungslinien zu den ursprünglichen Punkten
+                    completed_image[y_line:y_line + frame_width + 1, x1] = 255
+                    completed_image[y_line:y_line + frame_width + 1, x2] = 255
+                    connections_made += 1
+                        
+                elif edge_name == 'unten':
+                    # Verbinde über die unterste Rahmenlinie
+                    y_line = new_height - frame_width
+                    points.sort()  # Nach X sortieren
+                    x1, _ = points[0]   # Erster Punkt
+                    x2, _ = points[-1]  # Letzter Punkt
+                    
+                    # Verbindung nur zwischen erstem und letztem Punkt dieser Kontur
+                    completed_image[y_line, x1:x2+1] = 255
+                    # Verbindungslinien zu den ursprünglichen Punkten
+                    completed_image[y_line - frame_width:y_line + 1, x1] = 255  
+                    completed_image[y_line - frame_width:y_line + 1, x2] = 255
+                    connections_made += 1
+                        
+                elif edge_name == 'links':
+                    # Verbinde über die linke Rahmenlinie
+                    x_line = frame_width - 1
+                    points.sort(key=lambda p: p[1])  # Nach Y sortieren
+                    _, y1 = points[0]   # Erster Punkt
+                    _, y2 = points[-1]  # Letzter Punkt
+                    
+                    # Verbindung nur zwischen erstem und letztem Punkt dieser Kontur
+                    completed_image[y1:y2+1, x_line] = 255
+                    # Verbindungslinien zu den ursprünglichen Punkten
+                    completed_image[y1, x_line:x_line + frame_width + 1] = 255
+                    completed_image[y2, x_line:x_line + frame_width + 1] = 255
+                    connections_made += 1
+                        
+                elif edge_name == 'rechts':
+                    # Verbinde über die rechte Rahmenlinie  
+                    x_line = new_width - frame_width
+                    points.sort(key=lambda p: p[1])  # Nach Y sortieren
+                    _, y1 = points[0]   # Erster Punkt
+                    _, y2 = points[-1]  # Letzter Punkt
+                    
+                    # Verbindung nur zwischen erstem und letztem Punkt dieser Kontur
+                    completed_image[y1:y2+1, x_line] = 255
+                    # Verbindungslinien zu den ursprünglichen Punkten
+                    completed_image[y1, x_line - frame_width:x_line + 1] = 255
+                    completed_image[y2, x_line - frame_width:x_line + 1] = 255
+                    connections_made += 1
+        
+        if contour_was_completed:
+            completed_contours += 1
+    
+    # Erkenne neue Konturen im erweiterten Bild mit Hierarchie
+    new_contours, new_hierarchy = cv2.findContours(completed_image, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    
+    print(f"Kontur-Vervollständigung: {completed_contours} Konturen vervollständigt, {connections_made} Verbindungen")
+    print(f"Bild erweitert: {old_width}x{old_height} -> {new_width}x{new_height}")
+    print(f"Neue Konturen: {len(new_contours)} (vorher: {len(contours)})")
+    
+    return completed_image, new_contours, new_hierarchy
+
 def save_contour_analysis(binary_image, contour_image, contours, hierarchy, extent, step_name, vectors=None, output_dir=None):
     """Speichert die Kontur-Analyse als Bilder"""
     print("Speichere Kontur-Analyse...")
     
-    # Filtere verschachtelte Konturen mit OpenCV Hierarchie
-    filtered_contours = filter_nested_contours_with_hierarchy(contours, hierarchy)
+    # Vervollständige einzelne abgeschnittene Konturen mit Rahmen
+    completed_image, completed_contours, completed_hierarchy = complete_individual_cut_contours(binary_image, contours, frame_width=5)
     
-    # Erstelle gefiltertes Konturen-Bild
-    filtered_contour_image = cv2.cvtColor(binary_image, cv2.COLOR_GRAY2RGB)
+    # Filtere verschachtelte Konturen mit OpenCV Hierarchie (verwende erweiterte Konturen)
+    filtered_contours = filter_nested_contours_with_hierarchy(completed_contours, completed_hierarchy)
+    
+    # Erstelle gefiltertes Konturen-Bild basierend auf vervollständigtem Bild
+    filtered_contour_image = cv2.cvtColor(completed_image, cv2.COLOR_GRAY2RGB)
     
     colors = [
         (255, 0, 0),    # Rot
@@ -508,12 +643,34 @@ def save_contour_analysis(binary_image, contour_image, contours, hierarchy, exte
     cv2.imwrite(filtered_filename, cv2.cvtColor(filtered_contour_image, cv2.COLOR_RGB2BGR))
     print(f"Gefiltertes Konturen-Bild gespeichert: {filtered_filename}")
     
+    # Berechne neues Extent für erweiterte Bilder
+    old_height, old_width = binary_image.shape
+    new_height, new_width = completed_image.shape
+    frame_width = (new_width - old_width) // 2
+    
+    # Erweitere Extent entsprechend
+    x_min, x_max, y_min, y_max = extent
+    x_range = x_max - x_min
+    y_range = y_max - y_min
+    
+    # Berechne Pixel-zu-Koordinaten-Verhältnis
+    x_scale = x_range / old_width
+    y_scale = y_range / old_height
+    
+    # Neues Extent mit Rahmen
+    new_extent = [
+        x_min - frame_width * x_scale,  # x_min
+        x_max + frame_width * x_scale,  # x_max  
+        y_min - frame_width * y_scale,  # y_min
+        y_max + frame_width * y_scale   # y_max
+    ]
+    
     # Erstelle kombinierte 3-Panel Visualisierung
     fig, axes = plt.subplots(1, 3, figsize=(22, 6))
     
-    # Binärbild links
+    # Ursprüngliches Binärbild links
     axes[0].imshow(binary_image, extent=extent, origin='lower', cmap='gray', interpolation='nearest')
-    axes[0].set_title('Binäres Schwellenwert-Bild')
+    axes[0].set_title('Ursprüngliches Binärbild')
     axes[0].set_xlabel('X-Koordinate')
     axes[0].set_ylabel('Y-Koordinate')
     
@@ -524,9 +681,9 @@ def save_contour_analysis(binary_image, contour_image, contours, hierarchy, exte
             axes[0].plot(pos['x'], pos['y'], 'ro', markersize=5, markeredgecolor='white', markeredgewidth=1)
             axes[0].text(pos['x'], pos['y'], f"  P{vector['id']}", color='red', fontweight='bold', fontsize=8)
     
-    # Alle Konturen-Bild mitte
+    # Alle Konturen-Bild mitte (original)
     axes[1].imshow(contour_image, extent=extent, origin='lower', interpolation='nearest')
-    axes[1].set_title(f'Alle Konturen ({len(contours)} gefunden)')
+    axes[1].set_title(f'Ursprüngliche Konturen ({len(contours)})')
     axes[1].set_xlabel('X-Koordinate')  
     axes[1].set_ylabel('Y-Koordinate')
     
@@ -537,13 +694,13 @@ def save_contour_analysis(binary_image, contour_image, contours, hierarchy, exte
             axes[1].plot(pos['x'], pos['y'], 'yo', markersize=5, markeredgecolor='black', markeredgewidth=1)
             axes[1].text(pos['x'], pos['y'], f"  P{vector['id']}", color='yellow', fontweight='bold', fontsize=8)
     
-    # Gefilterte Konturen-Bild rechts
-    axes[2].imshow(filtered_contour_image, extent=extent, origin='lower', interpolation='nearest')
-    axes[2].set_title(f'Gefilterte Konturen ({len(filtered_contours)} nach Verschachtelung)')
+    # Erweiterte und gefilterte Konturen-Bild rechts
+    axes[2].imshow(filtered_contour_image, extent=new_extent, origin='lower', interpolation='nearest')
+    axes[2].set_title(f'Erweitert & Gefiltert ({len(filtered_contours)} final)')
     axes[2].set_xlabel('X-Koordinate')  
     axes[2].set_ylabel('Y-Koordinate')
     
-    # Anschlusspunkte im gefilterten Konturen-Bild
+    # Anschlusspunkte im erweiterten Konturen-Bild
     if vectors:
         for vector in vectors:
             pos = vector['position']
