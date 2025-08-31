@@ -502,20 +502,27 @@ def visualize_voxels_and_vectors(voxel_grid, vector_geometries):
         height=800
     )
 
-def main():
-    """Hauptfunktion"""
-    import sys
+def find_step_files(data_dir="Data"):
+    """Findet alle STEP-Dateien im Data-Ordner"""
+    step_extensions = ['.stp', '.step', '.STP', '.STEP']
+    step_files = []
     
-    # Prüfe Command Line Arguments
-    if len(sys.argv) > 1:
-        step_file = sys.argv[1]
-        # Wenn vollständiger Pfad angegeben, verwende ihn direkt
-        if not os.path.dirname(step_file):
-            # Wenn nur Dateiname angegeben, suche in Data-Ordner
-            step_file = os.path.join("Data", step_file)
-    else:
-        # Fallback auf festen Pfad im Data-Ordner
-        step_file = os.path.join("Data", "pxc_3209510_24_04_PT-2-5_3D.stp")
+    if not os.path.exists(data_dir):
+        print(f"Warnung: Data-Ordner '{data_dir}' nicht gefunden!")
+        return []
+    
+    for file in os.listdir(data_dir):
+        file_path = os.path.join(data_dir, file)
+        if os.path.isfile(file_path) and any(file.endswith(ext) for ext in step_extensions):
+            step_files.append(file_path)
+    
+    return sorted(step_files)
+
+def process_step_file(step_file):
+    """Verarbeitet eine einzelne STEP-Datei"""
+    print(f"\n{'='*60}")
+    print(f"Verarbeite: {os.path.basename(step_file)}")
+    print(f"{'='*60}")
     
     # Bestimme JSON-Dateiname basierend auf STEP-Datei
     step_name = os.path.splitext(os.path.basename(step_file))[0]
@@ -553,14 +560,65 @@ def main():
             if gradient_magnitude is not None:
                 visualize_depth_gradients(depth_image, grad_x, grad_y, gradient_magnitude, extent, step_name, vectors, output_dir)
         
-        # 3D-Voxel-Visualisierung übersprungen (nicht mehr benötigt)
-        
-        print("Programm beendet.")
+        print(f"[OK] Erfolgreich verarbeitet: {os.path.basename(step_file)}")
+        return True
         
     except Exception as e:
-        print(f"Fehler: {e}")
+        print(f"[FEHLER] Fehler bei {os.path.basename(step_file)}: {e}")
         import traceback
         traceback.print_exc()
+        return False
+
+def main():
+    """Hauptfunktion"""
+    import sys
+    
+    # Prüfe Command Line Arguments
+    if len(sys.argv) > 1:
+        step_file = sys.argv[1]
+        # Wenn vollständiger Pfad angegeben, verwende ihn direkt
+        if not os.path.dirname(step_file):
+            # Wenn nur Dateiname angegeben, suche in Data-Ordner
+            step_file = os.path.join("Data", step_file)
+        
+        print("Einzeldatei-Modus:")
+        success = process_step_file(step_file)
+        if success:
+            print("\nVerarbeitung erfolgreich abgeschlossen.")
+        else:
+            print("\nVerarbeitung mit Fehlern beendet.")
+    else:
+        # Batch-Modus: Alle STEP-Dateien im Data-Ordner verarbeiten
+        print("Batch-Modus: Suche alle STEP-Dateien im Data-Ordner...")
+        step_files = find_step_files("Data")
+        
+        if not step_files:
+            print("Keine STEP-Dateien im Data-Ordner gefunden!")
+            return
+        
+        print(f"Gefundene STEP-Dateien: {len(step_files)}")
+        for step_file in step_files:
+            print(f"  - {os.path.basename(step_file)}")
+        
+        # Verarbeite alle Dateien
+        successful = 0
+        failed = 0
+        
+        for step_file in step_files:
+            success = process_step_file(step_file)
+            if success:
+                successful += 1
+            else:
+                failed += 1
+        
+        # Zusammenfassung
+        print(f"\n{'='*60}")
+        print("BATCH-VERARBEITUNG ABGESCHLOSSEN")
+        print(f"{'='*60}")
+        print(f"Erfolgreich: {successful}")
+        print(f"Fehlgeschlagen: {failed}")
+        print(f"Gesamt: {len(step_files)}")
+        print(f"{'='*60}")
 
 if __name__ == "__main__":
     main()
