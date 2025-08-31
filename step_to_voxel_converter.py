@@ -330,6 +330,173 @@ def differentiate_depth_image(depth_image):
     
     return grad_x, grad_y, gradient_magnitude
 
+def detect_contours(gradient_magnitude, threshold_factor=0.1):
+    """
+    Erkennt geschlossene Konturen im Gradientenmagnitude-Bild
+    
+    Args:
+        gradient_magnitude: 2D numpy array mit Gradientenmagnitude-Werten
+        threshold_factor: Schwellenwert-Faktor (0.0-1.0) für Konturenerkennung
+    
+    Returns:
+        contours: Liste der erkannten Konturen
+        binary_image: Binäres Bild für Konturenerkennung
+        contour_image: RGB-Bild mit gezeichneten Konturen
+    """
+    print("Erkenne geschlossene Konturen...")
+    
+    if gradient_magnitude is None:
+        return [], None, None
+    
+    # Konvertiere zu 8-bit für OpenCV
+    valid_mask = gradient_magnitude > 0
+    if not np.any(valid_mask):
+        print("Warnung: Keine gültigen Gradientenwerte für Konturenerkennung")
+        return [], None, None
+    
+    # Normalisiere Gradienten zu 0-255
+    grad_normalized = np.zeros_like(gradient_magnitude, dtype=np.uint8)
+    valid_values = gradient_magnitude[valid_mask]
+    grad_min, grad_max = valid_values.min(), valid_values.max()
+    
+    if grad_max > grad_min:
+        grad_normalized[valid_mask] = 255 * (valid_values - grad_min) / (grad_max - grad_min)
+    
+    # Schwellenwert für Binärbild
+    threshold_value = int(255 * threshold_factor)
+    _, binary_image = cv2.threshold(grad_normalized, threshold_value, 255, cv2.THRESH_BINARY)
+    
+    # Morphologische Operationen zur Verbesserung der Konturen
+    kernel = np.ones((2,2), np.uint8)  # Kleinerer Kernel für feine Linien
+    binary_image = cv2.morphologyEx(binary_image, cv2.MORPH_CLOSE, kernel)
+    # binary_image = cv2.morphologyEx(binary_image, cv2.MORPH_OPEN, kernel)  # Open kann dünne Linien zerstören
+    
+    # Finde Konturen
+    contours, _ = cv2.findContours(binary_image, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
+    # Filtere kleine Konturen heraus
+    min_contour_area = 20  # Minimale Konturengröße in Pixeln (reduziert für Randlinien)
+    filtered_contours = [c for c in contours if cv2.contourArea(c) >= min_contour_area]
+    
+    print(f"Konturen gefunden: {len(contours)} total, {len(filtered_contours)} nach Filterung")
+    
+    # Erstelle Farbvisualisierung der Konturen
+    contour_image = cv2.cvtColor(binary_image, cv2.COLOR_GRAY2RGB)
+    
+    # Zeichne Konturen in verschiedenen Farben
+    colors = [
+        (255, 0, 0),    # Rot
+        (0, 255, 0),    # Grün  
+        (0, 0, 255),    # Blau
+        (255, 255, 0),  # Gelb
+        (255, 0, 255),  # Magenta
+        (0, 255, 255),  # Cyan
+        (255, 128, 0),  # Orange
+        (128, 0, 255),  # Violett
+    ]
+    
+    for i, contour in enumerate(filtered_contours):
+        color = colors[i % len(colors)]
+        cv2.drawContours(contour_image, [contour], -1, color, 2)
+        
+        # Füge Kontur-Information hinzu
+        area = cv2.contourArea(contour)
+        perimeter = cv2.arcLength(contour, True)
+        
+        # Berechne Zentroid für Text-Position
+        M = cv2.moments(contour)
+        if M["m00"] != 0:
+            cx = int(M["m10"] / M["m00"])
+            cy = int(M["m01"] / M["m00"])
+            cv2.putText(contour_image, f"C{i+1}", (cx-10, cy), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+    
+    return filtered_contours, binary_image, contour_image
+
+def save_contour_analysis(binary_image, contour_image, contours, extent, step_name, vectors=None, output_dir=None):
+    """Speichert die Kontur-Analyse als Bilder"""
+    print("Speichere Kontur-Analyse...")
+    
+    # Bestimme Dateinamen
+    if output_dir:
+        binary_filename = os.path.join(output_dir, f"{step_name}_contours_binary.png")
+        contour_filename = os.path.join(output_dir, f"{step_name}_contours_detected.png")
+        combined_contour_filename = os.path.join(output_dir, f"{step_name}_contours_analysis.png")
+    else:
+        binary_filename = f"{step_name}_contours_binary.png"
+        contour_filename = f"{step_name}_contours_detected.png"
+        combined_contour_filename = f"{step_name}_contours_analysis.png"
+    
+    # Speichere Binärbild
+    cv2.imwrite(binary_filename, binary_image)
+    print(f"Binärbild gespeichert: {binary_filename}")
+    
+    # Speichere Konturen-Bild  
+    cv2.imwrite(contour_filename, cv2.cvtColor(contour_image, cv2.COLOR_RGB2BGR))
+    print(f"Konturen-Bild gespeichert: {contour_filename}")
+    
+    # Erstelle kombinierte Visualisierung
+    fig, axes = plt.subplots(1, 2, figsize=(15, 6))
+    
+    # Binärbild links
+    axes[0].imshow(binary_image, extent=extent, origin='lower', cmap='gray', interpolation='nearest')
+    axes[0].set_title('Binäres Schwellenwert-Bild')
+    axes[0].set_xlabel('X-Koordinate')
+    axes[0].set_ylabel('Y-Koordinate')
+    
+    # Anschlusspunkte im Binärbild
+    if vectors:
+        for vector in vectors:
+            pos = vector['position']
+            axes[0].plot(pos['x'], pos['y'], 'ro', markersize=5, markeredgecolor='white', markeredgewidth=1)
+            axes[0].text(pos['x'], pos['y'], f"  P{vector['id']}", color='red', fontweight='bold', fontsize=8)
+    
+    # Konturen-Bild rechts
+    axes[1].imshow(contour_image, extent=extent, origin='lower', interpolation='nearest')
+    axes[1].set_title(f'Erkannte Konturen ({len(contours)} gefunden)')
+    axes[1].set_xlabel('X-Koordinate')  
+    axes[1].set_ylabel('Y-Koordinate')
+    
+    # Anschlusspunkte im Konturen-Bild
+    if vectors:
+        for vector in vectors:
+            pos = vector['position']
+            axes[1].plot(pos['x'], pos['y'], 'yo', markersize=5, markeredgecolor='black', markeredgewidth=1)
+            axes[1].text(pos['x'], pos['y'], f"  P{vector['id']}", color='yellow', fontweight='bold', fontsize=8)
+    
+    # Kontur-Statistiken als Text
+    if contours:
+        stats_text = "Kontur-Statistiken:\n"
+        for i, contour in enumerate(contours[:5]):  # Zeige nur erste 5 Konturen
+            area = cv2.contourArea(contour)
+            perimeter = cv2.arcLength(contour, True)
+            stats_text += f"C{i+1}: Area={area:.0f}, Umfang={perimeter:.1f}\n"
+        
+        if len(contours) > 5:
+            stats_text += f"... und {len(contours)-5} weitere"
+            
+        plt.figtext(0.02, 0.02, stats_text, fontsize=8, verticalalignment='bottom')
+    
+    plt.tight_layout()
+    plt.subplots_adjust(bottom=0.15)  # Platz für Statistiken
+    plt.savefig(combined_contour_filename, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"Kombinierte Kontur-Analyse gespeichert: {combined_contour_filename}")
+    
+    # Detaillierte Kontur-Informationen ausgeben
+    if contours:
+        print(f"Kontur-Details:")
+        for i, contour in enumerate(contours):
+            area = cv2.contourArea(contour)
+            perimeter = cv2.arcLength(contour, True)
+            
+            # Approximiere Kontur für Formerkennung
+            epsilon = 0.02 * perimeter
+            approx = cv2.approxPolyDP(contour, epsilon, True)
+            
+            print(f"  C{i+1}: Area={area:.0f}, Umfang={perimeter:.1f}, Eckpunkte={len(approx)}")
+    else:
+        print("  Keine Konturen erkannt")
+
 def visualize_depth_gradients(depth_image, grad_x, grad_y, gradient_magnitude, extent, step_name, vectors=None, output_dir=None):
     """Visualisiert Tiefenbild und seine Gradienten mit Anschlusspunkten"""
     if depth_image is None:
@@ -558,7 +725,15 @@ def process_step_file(step_file):
             # Berechne und visualisiere Gradienten
             grad_x, grad_y, gradient_magnitude = differentiate_depth_image(depth_image)
             if gradient_magnitude is not None:
+                # Erkenne Konturen
+                contours, binary_image, contour_image = detect_contours(gradient_magnitude)
+                
+                # Visualisiere alle Ergebnisse
                 visualize_depth_gradients(depth_image, grad_x, grad_y, gradient_magnitude, extent, step_name, vectors, output_dir)
+                
+                # Speichere Kontur-Analyse
+                if contour_image is not None:
+                    save_contour_analysis(binary_image, contour_image, contours, extent, step_name, vectors, output_dir)
         
         print(f"[OK] Erfolgreich verarbeitet: {os.path.basename(step_file)}")
         return True
