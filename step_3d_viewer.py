@@ -6,12 +6,13 @@ PyQt6 3D Viewer für STEP-Dateien mit Anschlussvektorauswahl
 import sys
 import json
 import os
+import glob
 import numpy as np
 import trimesh
 import open3d as o3d
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, 
                              QHBoxLayout, QWidget, QPushButton, QLabel, 
-                             QListWidget, QMessageBox, QStatusBar, QFileDialog, QCheckBox)
+                             QListWidget, QListWidgetItem, QMessageBox, QStatusBar, QFileDialog, QCheckBox)
 from PyQt6.QtOpenGLWidgets import QOpenGLWidget
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QPixmap, QAction
@@ -898,7 +899,8 @@ class STEP3DMainWindow(QMainWindow):
         self.current_step_file = None  # Pfad zur aktuell geladenen STEP-Datei
         
         self.initUI()
-        # Lade keine Datei automatisch - User wählt sie aus
+        # Lade STEP-Dateien aus Data-Ordner
+        self.load_step_files_list()
         
     def initUI(self):
         """Initialisiert die Benutzeroberfläche"""
@@ -921,11 +923,14 @@ class STEP3DMainWindow(QMainWindow):
         sidebar = QWidget()
         sidebar_layout = QVBoxLayout(sidebar)
         
-        # Datei-Auswahl
-        file_btn = QPushButton("📁 STEP-Datei öffnen")
-        file_btn.setStyleSheet("QPushButton { background-color: #4CAF50; color: white; font-weight: bold; padding: 8px; }")
-        file_btn.clicked.connect(self.open_step_file)
-        sidebar_layout.addWidget(file_btn)
+        # STEP-Dateien Liste
+        step_files_label = QLabel("STEP-Dateien")
+        step_files_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        sidebar_layout.addWidget(step_files_label)
+        
+        self.step_files_list = QListWidget()
+        self.step_files_list.itemClicked.connect(self.on_step_file_selected)
+        sidebar_layout.addWidget(self.step_files_list)
         
         # Titel
         title_label = QLabel("Anschlussvektoren")
@@ -1002,22 +1007,6 @@ class STEP3DMainWindow(QMainWindow):
         # Statusbar
         self.statusBar().showMessage("Bereit - Öffnen Sie eine STEP-Datei um zu beginnen")
         
-    def open_step_file(self):
-        """Öffnet File-Dialog zum Auswählen einer STEP-Datei"""
-        file_dialog = QFileDialog()
-        file_path, _ = file_dialog.getOpenFileName(
-            self,
-            "STEP-Datei auswählen",
-            "",
-            "STEP-Dateien (*.stp *.step);;Alle Dateien (*.*)"
-        )
-        
-        if file_path:
-            self.current_step_file = file_path  # Speichere den Pfad der STEP-Datei
-            self.load_step_file(file_path)
-            # Nach dem Laden der STEP-Datei, prüfe auf entsprechende JSON-Datei
-            self.auto_load_json_if_exists()
-            
     def load_step_file(self, step_file_path):
         """Lädt die STEP-Datei und konvertiert sie"""
         if not os.path.exists(step_file_path):
@@ -1247,6 +1236,45 @@ class STEP3DMainWindow(QMainWindow):
         self.viewer.update()
         status = "sichtbar" if checked else "ausgeblendet"
         self.statusBar().showMessage(f"Koordinatensystem {status}")
+        
+    def load_step_files_list(self):
+        """Lädt alle STEP-Dateien aus dem Data-Ordner in die Liste"""
+        data_dir = os.path.join(os.path.dirname(__file__), "Data")
+        if not os.path.exists(data_dir):
+            self.statusBar().showMessage("Data-Ordner nicht gefunden")
+            return
+            
+        # Suche nach STEP-Dateien
+        step_files = []
+        for ext in ['*.stp', '*.step']:
+            step_files.extend(glob.glob(os.path.join(data_dir, ext)))
+            
+        if not step_files:
+            self.statusBar().showMessage("Keine STEP-Dateien im Data-Ordner gefunden")
+            return
+            
+        # Füge Dateien zur Liste hinzu
+        self.step_files_list.clear()
+        for file_path in sorted(step_files):
+            filename = os.path.basename(file_path)
+            item = QListWidgetItem(filename)
+            item.setData(Qt.ItemDataRole.UserRole, file_path)  # Speichere vollständigen Pfad
+            self.step_files_list.addItem(item)
+            
+        self.statusBar().showMessage(f"{len(step_files)} STEP-Dateien gefunden")
+        
+    def on_step_file_selected(self, item):
+        """Wird aufgerufen wenn eine STEP-Datei aus der Liste ausgewählt wird"""
+        file_path = item.data(Qt.ItemDataRole.UserRole)
+        filename = item.text()
+        
+        self.statusBar().showMessage(f"Lade {filename}...")
+        
+        # Lade die ausgewählte STEP-Datei
+        self.current_step_file = file_path
+        self.load_step_file(file_path)
+        # Nach dem Laden der STEP-Datei, prüfe auf entsprechende JSON-Datei
+        self.auto_load_json_if_exists()
 
 def main():
     app = QApplication(sys.argv)
