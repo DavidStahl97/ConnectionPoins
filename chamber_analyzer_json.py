@@ -573,7 +573,14 @@ def detect_contours_from_depth(depth_image, threshold_factor=0.1):
 
     # Gradientenmagnitude
     gradient_magnitude = np.sqrt(grad_x**2 + grad_y**2)
-    gradient_magnitude[~valid_mask] = 0
+
+    # Erodiere valid_mask um Randpixel zu entfernen (dort sind immer hohe Gradienten)
+    # Dies entfernt Gradienten am Rand des Bauteils (wo Tiefenwerte zu NaN übergehen)
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+    valid_mask_eroded = cv2.erode(valid_mask.astype(np.uint8), kernel, iterations=2)
+
+    # Setze Gradienten außerhalb der erodierten Maske auf 0
+    gradient_magnitude[valid_mask_eroded == 0] = 0
 
     # Schwellwert für Konturerkennung
     threshold = threshold_factor * np.max(gradient_magnitude)
@@ -593,22 +600,27 @@ def detect_contours_from_depth(depth_image, threshold_factor=0.1):
     filtered_contours = [c for c in contours if cv2.contourArea(c) >= min_contour_area]
     print(f"  After size filter (>={min_contour_area} px²): {len(filtered_contours)}")
 
-    # Vervollständige abgeschnittene Konturen am Rand
-    completed_image, completed_contours, completed_hierarchy = complete_individual_cut_contours(
-        binary_image, filtered_contours, frame_width=5
-    )
+    # TEMPORÄR DEAKTIVIERT: Vervollständige abgeschnittene Konturen am Rand
+    # completed_image, completed_contours, completed_hierarchy = complete_individual_cut_contours(
+    #     binary_image, filtered_contours, frame_width=5
+    # )
+    #
+    # # Filtere kleine Konturen erneut (nach Vervollständigung)
+    # completed_filtered = [c for c in completed_contours if cv2.contourArea(c) >= min_contour_area]
+    #
+    # # Filtere verschachtelte Konturen (innere Konturen entfernen)
+    # final_contours = filter_nested_contours_with_hierarchy(
+    #     completed_filtered, completed_contours, completed_hierarchy
+    # )
 
-    # Filtere kleine Konturen erneut (nach Vervollständigung)
-    completed_filtered = [c for c in completed_contours if cv2.contourArea(c) >= min_contour_area]
-
-    # Filtere verschachtelte Konturen (innere Konturen entfernen)
+    # Filtere verschachtelte Konturen direkt (ohne edge completion)
     final_contours = filter_nested_contours_with_hierarchy(
-        completed_filtered, completed_contours, completed_hierarchy
+        filtered_contours, contours, hierarchy
     )
 
     print(f"  Final contours: {len(final_contours)}")
 
-    return final_contours, binary_image, completed_hierarchy
+    return final_contours, binary_image, hierarchy
 
 def calculate_chamber_center_for_point(cp, contours, depth_image, extent_info, direction_vector):
     """
