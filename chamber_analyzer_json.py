@@ -341,6 +341,58 @@ def voxels_to_depth_image_custom_direction(voxel_grid, direction_vector):
     # Gebe extent und transform_info zurück
     return depth_image, (extent, transform_info)
 
+def filter_nested_contours_with_hierarchy(filtered_contours, all_contours, hierarchy):
+    """
+    Entfernt verschachtelte Konturen basierend auf OpenCV Hierarchie-Information
+
+    Args:
+        filtered_contours: Bereits größengefilterte Konturen
+        all_contours: Alle ursprünglichen Konturen (für Index-Mapping)
+        hierarchy: OpenCV Hierarchie-Array [next, previous, first_child, parent]
+
+    Returns:
+        filtered_contours: Liste von Konturen ohne verschachtelte Konturen
+    """
+    if len(filtered_contours) <= 1 or hierarchy is None:
+        return filtered_contours
+
+    print("  Filtere verschachtelte Konturen mit OpenCV Hierarchie...")
+
+    # Hierarchie-Format: [next, previous, first_child, parent]
+    # parent == -1: Kontur ist auf oberster Ebene (nicht verschachtelt)
+    # parent >= 0: Kontur hat eine Eltern-Kontur (ist verschachtelt)
+
+    # Erstelle Mapping von Kontur-Objekten zu Original-Indizes
+    contour_to_index = {}
+    for i, contour in enumerate(all_contours):
+        # Nutze id() als eindeutigen Identifier
+        contour_to_index[id(contour)] = i
+
+    outer_contours = []
+    removed_count = 0
+
+    for contour in filtered_contours:
+        # Finde Original-Index
+        contour_id = id(contour)
+        if contour_id in contour_to_index:
+            i = contour_to_index[contour_id]
+            parent_index = hierarchy[0][i][3]  # Parent-Index
+
+            if parent_index == -1:
+                # Kontur ist auf oberster Ebene - behalten
+                outer_contours.append(contour)
+            else:
+                # Kontur ist verschachtelt - entfernen
+                print(f"    Entferne verschachtelte Kontur (Kind von C{parent_index+1})")
+                removed_count += 1
+        else:
+            # Fallback: Kontur behalten wenn Index nicht gefunden
+            outer_contours.append(contour)
+
+    print(f"  Verschachtelte Konturen: {len(filtered_contours)} -> {len(outer_contours)} (entfernt: {removed_count})")
+
+    return outer_contours
+
 def detect_contours_from_depth(depth_image, threshold_factor=0.1):
     """Erkennt Konturen aus Tiefenbild mittels Gradientenanalyse"""
     print("Detecting contours from depth image")
@@ -372,6 +424,9 @@ def detect_contours_from_depth(depth_image, threshold_factor=0.1):
     # Filtere kleine Konturen
     min_contour_area = 20
     filtered_contours = [c for c in contours if cv2.contourArea(c) >= min_contour_area]
+
+    # Filtere verschachtelte Konturen (innere Konturen entfernen)
+    filtered_contours = filter_nested_contours_with_hierarchy(filtered_contours, contours, hierarchy)
 
     print(f"Detected {len(filtered_contours)} contours (filtered from {len(contours)})")
 
