@@ -137,11 +137,12 @@
                 <!-- Info Panel -->
                 <Border Grid.Row="4" Background="#E3F2FD" Padding="10">
                     <TextBlock TextWrapping="Wrap" FontSize="11">
-                        <Bold>Bedienung:</Bold><LineBreak/>
-                        • Linke Maus + Ziehen: Drehen<LineBreak/>
-                        • Mausrad: Zoomen<LineBreak/>
-                        • Mittlere Maus + Ziehen: Verschieben<LineBreak/>
-                        • Rechtsklick: Kontext-Menü
+                        <Bold>Maussteuerung:</Bold><LineBreak/>
+                        • <Bold>Linke Maus + Ziehen:</Bold> Drehen<LineBreak/>
+                        • <Bold>Mittlere Maus + Ziehen:</Bold> Verschieben (Pan)<LineBreak/>
+                        • <Bold>Rechte Maus + Ziehen:</Bold> Zoomen<LineBreak/>
+                        • <Bold>Mausrad:</Bold> Zoomen<LineBreak/>
+                        • <Bold>ViewCube klicken:</Bold> Ansicht ausrichten
                     </TextBlock>
                 </Border>
             </Grid>
@@ -153,7 +154,16 @@
                                    Background="#F0F0F0"
                                    ShowCoordinateSystem="True"
                                    ShowViewCube="True"
-                                   ZoomExtentsWhenLoaded="True">
+                                   ZoomExtentsWhenLoaded="True"
+                                   IsInertiaEnabled="True"
+                                   RotateGesture="LeftClick"
+                                   PanGesture="MiddleClick"
+                                   ZoomGesture="RightClick"
+                                   CameraRotationMode="Turntable"
+                                   InfiniteSpin="False"
+                                   ZoomSensitivity="1.0"
+                                   RotationSensitivity="1.0"
+                                   CameraInertiaFactor="0.9">
 
                 <!-- Camera -->
                 <helix:HelixViewport3D.Camera>

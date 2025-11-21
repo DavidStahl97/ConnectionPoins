@@ -99,13 +99,16 @@ Oder alternativ die kompilierte EXE ausführen:
 
 1. **Starten Sie die Anwendung**
 2. **Wählen Sie ein Bauteil** aus der Liste auf der rechten Seite
-3. **Navigieren Sie im 3D-Viewport**:
-   - Drehen: Linke Maustaste gedrückt halten und ziehen
-   - Zoomen: Mausrad
-   - Verschieben: Mittlere Maustaste gedrückt halten und ziehen
+3. **Navigieren Sie im 3D-Viewport** mit der Maus:
+   - **Drehen**: Linke Maustaste gedrückt halten und ziehen
+   - **Verschieben (Pan)**: Mittlere Maustaste gedrückt halten und ziehen
+   - **Zoomen**:
+     - Mausrad scrollen
+     - Rechte Maustaste gedrückt halten und ziehen
+   - **ViewCube**: Klicken Sie auf eine Seite für Standardansichten
 4. **Verwenden Sie die Ansichtsoptionen**:
-   - Schalten Sie verschiedene Elemente ein/aus
-   - Verwenden Sie die Zoom-Buttons
+   - Schalten Sie verschiedene Elemente ein/aus (3D-Modell, Anschlüsse, Koordinatensystem)
+   - Verwenden Sie die Zoom-Buttons für präzises Zoomen
    - Klicken Sie auf "🎯" um die Ansicht zurückzusetzen
 
 ## Logging
