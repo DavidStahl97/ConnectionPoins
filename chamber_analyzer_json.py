@@ -54,8 +54,17 @@ def analyze_chambers_from_json(json_file_path, output_dir=None):
 
             print(f"  InsertDirection: [{direction_vector[0]:.3f}, {direction_vector[1]:.3f}, {direction_vector[2]:.3f}]")
 
-            # Erstelle Tiefenbild in dieser Richtung
-            depth_image, extent = voxels_to_depth_image_custom_direction(voxel_grid, direction_vector)
+            # Lese Connection Point Position
+            cp_pos = cp.get('Point', {'X': 0.0, 'Y': 0.0, 'Z': 0.0})
+            connection_point_pos = np.array([cp_pos['X'], cp_pos['Y'], cp_pos['Z']])
+
+            # Erstelle Tiefenbild in dieser Richtung (nur 10mm Rechteck um Anschlusspunkt)
+            depth_image, extent = voxels_to_depth_image_custom_direction(
+                voxel_grid,
+                direction_vector,
+                connection_point_pos,
+                region_size_mm=10.0
+            )
 
             if depth_image is None:
                 print(f"  Warning: Failed to create depth image")
@@ -253,19 +262,23 @@ def voxels_to_depth_image(voxel_grid, direction='z'):
 
     return None, None
 
-def voxels_to_depth_image_custom_direction(voxel_grid, direction_vector):
+def voxels_to_depth_image_custom_direction(voxel_grid, direction_vector, connection_point_pos, region_size_mm=10.0):
     """
     Erstellt Tiefenbild aus Voxel Grid in beliebiger Richtung
+    Analysiert nur ein Rechteck von region_size_mm x region_size_mm um den Anschlusspunkt
 
     Args:
         voxel_grid: Open3D VoxelGrid
         direction_vector: Normalisierter Richtungsvektor [x, y, z]
+        connection_point_pos: Position des Anschlusspunkts [x, y, z]
+        region_size_mm: Größe des zu analysierenden Rechtecks in mm (Standard: 10mm)
 
     Returns:
         depth_image: 2D numpy array mit Tiefenwerten
         extent: [u_min, u_max, v_min, v_max] in Weltkoordinaten
     """
     print(f"Creating depth image in direction [{direction_vector[0]:.3f}, {direction_vector[1]:.3f}, {direction_vector[2]:.3f}]")
+    print(f"  Region: {region_size_mm}mm x {region_size_mm}mm um Anschlusspunkt")
 
     voxels = voxel_grid.get_voxels()
     if len(voxels) == 0:
@@ -295,13 +308,33 @@ def voxels_to_depth_image_custom_direction(voxel_grid, direction_vector):
     v_axis = np.cross(z_axis, u_axis)
     v_axis = v_axis / np.linalg.norm(v_axis)
 
-    # Projiziere Voxel-Koordinaten auf das neue Koordinatensystem
+    # Projiziere Connection Point auf das neue Koordinatensystem
+    cp_u = np.dot(connection_point_pos, u_axis)
+    cp_v = np.dot(connection_point_pos, v_axis)
+
+    # Definiere Rechteck um den Anschlusspunkt (region_size_mm x region_size_mm)
+    half_size = region_size_mm / 2.0
+    u_min = cp_u - half_size
+    u_max = cp_u + half_size
+    v_min = cp_v - half_size
+    v_max = cp_v + half_size
+
+    # Projiziere alle Voxel-Koordinaten auf das neue Koordinatensystem
     u_coords = np.dot(voxel_coords, u_axis)
     v_coords = np.dot(voxel_coords, v_axis)
     depth_coords = np.dot(voxel_coords, z_axis)
 
-    u_min, u_max = u_coords.min(), u_coords.max()
-    v_min, v_max = v_coords.min(), v_coords.max()
+    # Filtere Voxel: Nur die im definierten Rechteck behalten
+    mask = (u_coords >= u_min) & (u_coords <= u_max) & (v_coords >= v_min) & (v_coords <= v_max)
+    filtered_u_coords = u_coords[mask]
+    filtered_v_coords = v_coords[mask]
+    filtered_depth_coords = depth_coords[mask]
+
+    if len(filtered_u_coords) == 0:
+        print(f"  Warning: No voxels found in {region_size_mm}mm region around connection point!")
+        return None, None
+
+    print(f"  Filtered voxels: {len(filtered_u_coords)} / {len(u_coords)} ({len(filtered_u_coords)/len(u_coords)*100:.1f}%)")
 
     voxel_size = voxel_grid.voxel_size
     resolution_u = int(np.ceil((u_max - u_min) / voxel_size)) + 1
@@ -309,18 +342,18 @@ def voxels_to_depth_image_custom_direction(voxel_grid, direction_vector):
 
     print(f"  Depth image resolution: {resolution_u} x {resolution_v}")
 
-    # Erstelle Tiefenbild
+    # Erstelle Tiefenbild (nur für gefilterte Voxel)
     depth_image = np.full((resolution_v, resolution_u), np.nan)
 
-    for i in range(len(voxel_coords)):
-        u_idx = int(round((u_coords[i] - u_min) / voxel_size))
-        v_idx = int(round((v_coords[i] - v_min) / voxel_size))
+    for i in range(len(filtered_u_coords)):
+        u_idx = int(round((filtered_u_coords[i] - u_min) / voxel_size))
+        v_idx = int(round((filtered_v_coords[i] - v_min) / voxel_size))
 
         if 0 <= u_idx < resolution_u and 0 <= v_idx < resolution_v:
             current_depth = depth_image[v_idx, u_idx]
             # Speichere maximale Tiefe (am weitesten in Richtung direction_vector)
-            if np.isnan(current_depth) or depth_coords[i] > current_depth:
-                depth_image[v_idx, u_idx] = depth_coords[i]
+            if np.isnan(current_depth) or filtered_depth_coords[i] > current_depth:
+                depth_image[v_idx, u_idx] = filtered_depth_coords[i]
 
     extent = [u_min, u_max, v_min, v_max]
 
