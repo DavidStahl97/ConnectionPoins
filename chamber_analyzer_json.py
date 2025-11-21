@@ -470,7 +470,7 @@ def calculate_chamber_centers(contours, connection_points, depth_image, extent, 
 
 def save_visualization_for_point(depth_image, contours, cp, chamber_center, extent_info, output_dir, part_nr):
     """
-    Speichert Visualisierung für einen einzelnen Connection Point
+    Speichert erweiterte Visualisierungen für einen einzelnen Connection Point
 
     Args:
         depth_image: 2D Tiefenbild
@@ -483,61 +483,133 @@ def save_visualization_for_point(depth_image, contours, cp, chamber_center, exte
     """
     extent, transform_info = extent_info
     u_min, u_max, v_min, v_max = extent
+    voxel_size = transform_info['voxel_size']
+    u_axis = transform_info['u_axis']
+    v_axis = transform_info['v_axis']
+    z_axis = transform_info['z_axis']
 
     # Dateiname mit Connection Point Index
-    filename = f"{part_nr}_CP{cp['Index']}_{cp['Name'].replace(' ', '_')}"
-
-    # 1. Tiefenbild mit Konturen
-    fig, ax = plt.subplots(figsize=(10, 8), dpi=150)
+    filename_base = f"{part_nr}_CP{cp['Index']}_{cp['Name'].replace(' ', '_')}"
 
     valid_mask = ~np.isnan(depth_image)
     depth_display = depth_image.copy()
     if np.any(valid_mask):
         depth_display[~valid_mask] = np.nanmin(depth_image)
+    else:
+        print(f"  Warning: No valid depth data for visualization")
+        return
 
-        im = ax.imshow(depth_display, extent=extent, origin='lower', cmap='viridis')
-        plt.colorbar(im, ax=ax, label='Depth')
+    # Connection Point Position in U/V
+    cp_point = cp['Point']
+    cp_world = np.array([cp_point['X'], cp_point['Y'], cp_point['Z']])
+    cp_u = np.dot(cp_world, u_axis)
+    cp_v = np.dot(cp_world, v_axis)
 
-        # Zeichne Konturen
-        voxel_size = transform_info['voxel_size']
-        u_axis = transform_info['u_axis']
-        v_axis = transform_info['v_axis']
-        z_axis = transform_info['z_axis']
+    # Chamber Center Position (falls vorhanden)
+    cc_u, cc_v = None, None
+    if chamber_center['chamber_center'] is not None:
+        cc = chamber_center['chamber_center']
+        cc_world = np.array([cc['X'], cc['Y'], cc['Z']])
+        cc_u = np.dot(cc_world, u_axis)
+        cc_v = np.dot(cc_world, v_axis)
 
-        for i, contour in enumerate(contours):
-            contour_squeezed = contour.squeeze()
-            if len(contour_squeezed.shape) == 1:
-                continue
-
-            contour_u = u_min + contour_squeezed[:, 0] * voxel_size
-            contour_v = v_min + contour_squeezed[:, 1] * voxel_size
-
-            ax.plot(contour_u, contour_v, 'r-', linewidth=2)
-
-        # Zeichne Connection Point Position (in U/V Koordinaten)
-        cp_point = cp['Point']
-        cp_world = np.array([cp_point['X'], cp_point['Y'], cp_point['Z']])
-        cp_u = np.dot(cp_world, u_axis)
-        cp_v = np.dot(cp_world, v_axis)
-        ax.plot(cp_u, cp_v, 'ro', markersize=10, label='Connection Point', markeredgecolor='white', markeredgewidth=2)
-
-        # Zeichne Chamber Center (falls vorhanden)
-        if chamber_center['chamber_center'] is not None:
-            cc = chamber_center['chamber_center']
-            cc_world = np.array([cc['X'], cc['Y'], cc['Z']])
-            cc_u = np.dot(cc_world, u_axis)
-            cc_v = np.dot(cc_world, v_axis)
-            ax.plot(cc_u, cc_v, 'g^', markersize=12, label='Chamber Center', markeredgecolor='white', markeredgewidth=2)
-
-        ax.set_xlabel('U')
-        ax.set_ylabel('V')
-        ax.set_title(f'{part_nr} - CP{cp["Index"]}: {cp["Name"]}\nInsertDirection: {cp.get("InsertDirection", {})}')
-        ax.legend()
-
-    plt.savefig(os.path.join(output_dir, f'{filename}_analysis.png'), bbox_inches='tight')
+    # 1. Tiefenbild allein
+    fig, ax = plt.subplots(figsize=(10, 8), dpi=150)
+    im = ax.imshow(depth_display, extent=extent, origin='lower', cmap='viridis')
+    plt.colorbar(im, ax=ax, label='Depth')
+    ax.set_xlabel('U')
+    ax.set_ylabel('V')
+    ax.set_title(f'Depth Image - CP{cp["Index"]}: {cp["Name"]}')
+    plt.savefig(os.path.join(output_dir, f'{filename_base}_1_depth.png'), bbox_inches='tight')
     plt.close()
 
-    print(f"  Saved visualization: {filename}_analysis.png")
+    # 2. Berechne Gradienten
+    depth_filled = depth_image.copy()
+    depth_filled[~valid_mask] = 0
+
+    grad_x = cv2.Sobel(depth_filled, cv2.CV_64F, 1, 0, ksize=3)
+    grad_y = cv2.Sobel(depth_filled, cv2.CV_64F, 0, 1, ksize=3)
+    gradient_magnitude = np.sqrt(grad_x**2 + grad_y**2)
+    gradient_magnitude[~valid_mask] = 0
+
+    # 3. Gradient X
+    fig, ax = plt.subplots(figsize=(10, 8), dpi=150)
+    im = ax.imshow(grad_x, extent=extent, origin='lower', cmap='RdBu_r')
+    plt.colorbar(im, ax=ax, label='Gradient X')
+    ax.set_xlabel('U')
+    ax.set_ylabel('V')
+    ax.set_title(f'Gradient X - CP{cp["Index"]}')
+    plt.savefig(os.path.join(output_dir, f'{filename_base}_2_gradient_x.png'), bbox_inches='tight')
+    plt.close()
+
+    # 4. Gradient Y
+    fig, ax = plt.subplots(figsize=(10, 8), dpi=150)
+    im = ax.imshow(grad_y, extent=extent, origin='lower', cmap='RdBu_r')
+    plt.colorbar(im, ax=ax, label='Gradient Y')
+    ax.set_xlabel('U')
+    ax.set_ylabel('V')
+    ax.set_title(f'Gradient Y - CP{cp["Index"]}')
+    plt.savefig(os.path.join(output_dir, f'{filename_base}_3_gradient_y.png'), bbox_inches='tight')
+    plt.close()
+
+    # 5. Gradient Magnitude (Länge)
+    fig, ax = plt.subplots(figsize=(10, 8), dpi=150)
+    im = ax.imshow(gradient_magnitude, extent=extent, origin='lower', cmap='hot')
+    plt.colorbar(im, ax=ax, label='Gradient Magnitude')
+    ax.set_xlabel('U')
+    ax.set_ylabel('V')
+    ax.set_title(f'Gradient Magnitude - CP{cp["Index"]}')
+    plt.savefig(os.path.join(output_dir, f'{filename_base}_4_gradient_magnitude.png'), bbox_inches='tight')
+    plt.close()
+
+    # 6. Binary Image (nach Thresholding)
+    threshold = 0.1 * np.max(gradient_magnitude)
+    binary_image = (gradient_magnitude > threshold).astype(np.uint8) * 255
+
+    fig, ax = plt.subplots(figsize=(10, 8), dpi=150)
+    ax.imshow(binary_image, extent=extent, origin='lower', cmap='gray')
+    ax.set_xlabel('U')
+    ax.set_ylabel('V')
+    ax.set_title(f'Binary Image (Threshold={threshold:.2f}) - CP{cp["Index"]}')
+    plt.savefig(os.path.join(output_dir, f'{filename_base}_5_binary.png'), bbox_inches='tight')
+    plt.close()
+
+    # 7. Finale Analyse mit Konturen
+    fig, ax = plt.subplots(figsize=(10, 8), dpi=150)
+    im = ax.imshow(depth_display, extent=extent, origin='lower', cmap='viridis', alpha=0.7)
+    plt.colorbar(im, ax=ax, label='Depth')
+
+    # Zeichne Konturen
+    colors = ['red', 'orange', 'yellow', 'green', 'cyan', 'blue', 'magenta', 'pink']
+    for i, contour in enumerate(contours):
+        contour_squeezed = contour.squeeze()
+        if len(contour_squeezed.shape) == 1:
+            continue
+
+        contour_u = u_min + contour_squeezed[:, 0] * voxel_size
+        contour_v = v_min + contour_squeezed[:, 1] * voxel_size
+
+        color = colors[i % len(colors)]
+        ax.plot(contour_u, contour_v, color=color, linewidth=2, label=f'Contour {i+1}')
+
+    # Zeichne Connection Point
+    ax.plot(cp_u, cp_v, 'ro', markersize=12, label='Connection Point',
+            markeredgecolor='white', markeredgewidth=2, zorder=10)
+
+    # Zeichne Chamber Center
+    if cc_u is not None and cc_v is not None:
+        ax.plot(cc_u, cc_v, 'g^', markersize=14, label='Chamber Center',
+                markeredgecolor='white', markeredgewidth=2, zorder=10)
+
+    ax.set_xlabel('U')
+    ax.set_ylabel('V')
+    ax.set_title(f'Final Analysis - CP{cp["Index"]}: {cp["Name"]}\nInsertDirection: {cp.get("InsertDirection", {})}')
+    ax.legend(loc='upper right', fontsize=8)
+
+    plt.savefig(os.path.join(output_dir, f'{filename_base}_6_final_analysis.png'), bbox_inches='tight')
+    plt.close()
+
+    print(f"  Saved 6 visualization images for {filename_base}")
 
 def save_visualizations(depth_image, contours, connection_points, chamber_centers, extent, output_dir, part_nr):
     """Alte Funktion - wird nicht mehr verwendet"""
