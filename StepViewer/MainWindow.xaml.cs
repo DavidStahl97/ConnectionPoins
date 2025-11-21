@@ -173,6 +173,9 @@ namespace StepViewer
                 // Update connection points list
                 ConnectionPointsList.ItemsSource = _currentPartData.ConnectionPoints;
 
+                // Load and display existing chamber analysis results if available
+                LoadExistingChamberAnalysis(filePath);
+
                 // Zoom to fit
                 Viewport3D.ZoomExtents();
 
@@ -189,6 +192,76 @@ namespace StepViewer
                 MessageBox.Show($"Fehler beim Laden der Datei:\n{ex.Message}",
                     "Fehler", MessageBoxButton.OK, MessageBoxImage.Error);
                 StatusText.Text = "Fehler beim Laden der Datei";
+            }
+        }
+
+        /// <summary>
+        /// Load and display existing chamber analysis results if available
+        /// </summary>
+        private void LoadExistingChamberAnalysis(string jsonFilePath)
+        {
+            try
+            {
+                if (_currentPartData == null)
+                    return;
+
+                // Determine output directory path
+                var fileName = Path.GetFileNameWithoutExtension(jsonFilePath);
+                var baseDir = Path.GetDirectoryName(jsonFilePath);
+                var outputDir = Path.Combine(baseDir ?? "", fileName);
+                var resultsFile = Path.Combine(outputDir, $"{_currentPartData.PartNr}_chamber_analysis_results.json");
+
+                // Check if results file exists
+                if (!File.Exists(resultsFile))
+                {
+                    _logger.Debug("No existing chamber analysis results found at: {ResultsFile}", resultsFile);
+                    return;
+                }
+
+                _logger.Information("Loading existing chamber analysis results from: {ResultsFile}", resultsFile);
+
+                // Read and parse JSON
+                var jsonContent = File.ReadAllText(resultsFile);
+                var analysisResults = Newtonsoft.Json.JsonConvert.DeserializeObject<ChamberAnalysisResultsJson>(jsonContent);
+
+                if (analysisResults?.ChamberCenters == null || analysisResults.ChamberCenters.Count == 0)
+                {
+                    _logger.Warning("Chamber analysis results file is empty or invalid");
+                    return;
+                }
+
+                // Map JSON DTOs to ChamberCenter objects
+                var chamberCenters = new List<ChamberCenter>();
+                foreach (var item in analysisResults.ChamberCenters)
+                {
+                    var chamberCenter = new ChamberCenter
+                    {
+                        ConnectionPointIndex = item.ConnectionPointIndex,
+                        ConnectionPointName = item.ConnectionPointName ?? string.Empty,
+                        Center = item.ChamberCenter != null ? new Point3DData
+                        {
+                            X = item.ChamberCenter.X,
+                            Y = item.ChamberCenter.Y,
+                            Z = item.ChamberCenter.Z
+                        } : null
+                    };
+                    chamberCenters.Add(chamberCenter);
+                }
+
+                // Render chamber centers in 3D view
+                RenderChamberCenters(chamberCenters);
+
+                // Update status
+                var foundCount = chamberCenters.Count(c => c.Center != null);
+                AnalysisStatusText.Text = $"✓ {foundCount} Kammer-Zentren geladen";
+                AnalysisStatusText.Foreground = new SolidColorBrush(Colors.Green);
+
+                _logger.Information("Loaded and rendered {Count} existing chamber centers", foundCount);
+            }
+            catch (Exception ex)
+            {
+                _logger.Error(ex, "Failed to load existing chamber analysis results");
+                // Don't show error to user - just log it silently
             }
         }
 
@@ -657,6 +730,51 @@ namespace StepViewer
             public string FileName { get; set; } = string.Empty;
             public string PartNr { get; set; } = string.Empty;
             public int ConnectionCount { get; set; }
+        }
+
+        /// <summary>
+        /// JSON DTO for chamber analysis results
+        /// </summary>
+        private class ChamberAnalysisResultsJson
+        {
+            [Newtonsoft.Json.JsonProperty("part_nr")]
+            public string? PartNr { get; set; }
+
+            [Newtonsoft.Json.JsonProperty("analysis_timestamp")]
+            public string? AnalysisTimestamp { get; set; }
+
+            [Newtonsoft.Json.JsonProperty("chamber_centers")]
+            public List<ChamberCenterJson> ChamberCenters { get; set; } = new();
+        }
+
+        /// <summary>
+        /// JSON DTO for chamber center
+        /// </summary>
+        private class ChamberCenterJson
+        {
+            [Newtonsoft.Json.JsonProperty("connection_point_index")]
+            public int ConnectionPointIndex { get; set; }
+
+            [Newtonsoft.Json.JsonProperty("connection_point_name")]
+            public string? ConnectionPointName { get; set; }
+
+            [Newtonsoft.Json.JsonProperty("chamber_center")]
+            public Point3DJson? ChamberCenter { get; set; }
+        }
+
+        /// <summary>
+        /// JSON DTO for 3D point
+        /// </summary>
+        private class Point3DJson
+        {
+            [Newtonsoft.Json.JsonProperty("X")]
+            public double X { get; set; }
+
+            [Newtonsoft.Json.JsonProperty("Y")]
+            public double Y { get; set; }
+
+            [Newtonsoft.Json.JsonProperty("Z")]
+            public double Z { get; set; }
         }
     }
 }
