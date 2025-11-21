@@ -590,21 +590,20 @@ def save_visualization_for_point(depth_image, contours, cp, chamber_center, exte
         contour_v = v_min + contour_squeezed[:, 1] * voxel_size
 
         color = colors[i % len(colors)]
-        ax.plot(contour_u, contour_v, color=color, linewidth=2, label=f'Contour {i+1}')
+        ax.plot(contour_u, contour_v, color=color, linewidth=2)
 
-    # Zeichne Connection Point
-    ax.plot(cp_u, cp_v, 'ro', markersize=12, label='Connection Point',
+    # Zeichne Connection Point (roter Punkt)
+    ax.plot(cp_u, cp_v, 'ro', markersize=12,
             markeredgecolor='white', markeredgewidth=2, zorder=10)
 
-    # Zeichne Chamber Center
+    # Zeichne Chamber Center (grünes Dreieck)
     if cc_u is not None and cc_v is not None:
-        ax.plot(cc_u, cc_v, 'g^', markersize=14, label='Chamber Center',
+        ax.plot(cc_u, cc_v, 'g^', markersize=14,
                 markeredgecolor='white', markeredgewidth=2, zorder=10)
 
     ax.set_xlabel('U')
     ax.set_ylabel('V')
     ax.set_title(f'Final Analysis - CP{cp["Index"]}: {cp["Name"]}\nInsertDirection: {cp.get("InsertDirection", {})}')
-    ax.legend(loc='upper right', fontsize=8)
 
     plt.savefig(os.path.join(output_dir, f'{filename_base}_6_final_analysis.png'), bbox_inches='tight')
     plt.close()
