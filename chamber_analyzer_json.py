@@ -779,7 +779,15 @@ def save_visualization_for_point(depth_image, contours, cp, chamber_center, exte
     grad_x = cv2.Sobel(depth_filled, cv2.CV_64F, 1, 0, ksize=3)
     grad_y = cv2.Sobel(depth_filled, cv2.CV_64F, 0, 1, ksize=3)
     gradient_magnitude = np.sqrt(grad_x**2 + grad_y**2)
-    gradient_magnitude[~valid_mask] = 0
+
+    # Erodiere valid_mask um Randpixel zu entfernen (wie in detect_contours_from_depth)
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+    valid_mask_eroded = cv2.erode(valid_mask.astype(np.uint8), kernel, iterations=2)
+
+    # Setze Gradienten außerhalb der erodierten Maske auf 0
+    grad_x[valid_mask_eroded == 0] = 0
+    grad_y[valid_mask_eroded == 0] = 0
+    gradient_magnitude[valid_mask_eroded == 0] = 0
 
     # 3. Gradient X
     fig, ax = plt.subplots(figsize=(10, 8), dpi=150)
