@@ -1,0 +1,170 @@
+﻿<Window x:Class="StepViewer.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:StepViewer"
+        xmlns:helix="http://helix-toolkit.org/wpf"
+        mc:Ignorable="d"
+        Title="STEP 3D Viewer - Connection Points"
+        Height="900"
+        Width="1400"
+        WindowStartupLocation="CenterScreen">
+
+    <Window.Resources>
+        <!-- Style for ListBox items -->
+        <Style x:Key="FileListItemStyle" TargetType="ListBoxItem">
+            <Setter Property="Padding" Value="8,4"/>
+            <Setter Property="Margin" Value="2"/>
+            <Style.Triggers>
+                <Trigger Property="IsSelected" Value="True">
+                    <Setter Property="Background" Value="#2196F3"/>
+                    <Setter Property="Foreground" Value="White"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+    </Window.Resources>
+
+    <DockPanel LastChildFill="True">
+        <!-- Status Bar at Bottom -->
+        <StatusBar DockPanel.Dock="Bottom" Height="25">
+            <StatusBarItem>
+                <TextBlock x:Name="StatusText" Text="Bereit - Wählen Sie eine Datei aus der Liste"/>
+            </StatusBarItem>
+        </StatusBar>
+
+        <!-- Right Sidebar -->
+        <Border DockPanel.Dock="Right" Width="320" BorderBrush="#CCCCCC" BorderThickness="1,0,0,0">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="200"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <!-- Files List Header -->
+                <Border Grid.Row="0" Background="#F5F5F5" Padding="10">
+                    <TextBlock Text="Bauteile" FontSize="16" FontWeight="Bold"/>
+                </Border>
+
+                <!-- Files List -->
+                <ListBox x:Name="FileListBox"
+                         Grid.Row="1"
+                         SelectionChanged="FileListBox_SelectionChanged"
+                         ItemContainerStyle="{StaticResource FileListItemStyle}"
+                         ScrollViewer.VerticalScrollBarVisibility="Auto">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <StackPanel>
+                                <TextBlock Text="{Binding FileName}" FontWeight="SemiBold"/>
+                                <TextBlock Text="{Binding PartNr}" FontSize="10" Foreground="Gray"/>
+                                <TextBlock FontSize="10" Foreground="DarkGreen">
+                                    <Run Text="Anschlüsse: "/>
+                                    <Run Text="{Binding ConnectionCount}" FontWeight="Bold"/>
+                                </TextBlock>
+                            </StackPanel>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+
+                <!-- View Controls -->
+                <Border Grid.Row="2" Background="#F5F5F5" Padding="10">
+                    <StackPanel>
+                        <TextBlock Text="Ansicht" FontSize="14" FontWeight="Bold" Margin="0,0,0,10"/>
+
+                        <CheckBox x:Name="ShowMeshCheckBox"
+                                  Content="3D-Modell anzeigen"
+                                  IsChecked="True"
+                                  Checked="ShowMeshCheckBox_Changed"
+                                  Unchecked="ShowMeshCheckBox_Changed"
+                                  Margin="0,2"/>
+
+                        <CheckBox x:Name="ShowConnectionsCheckBox"
+                                  Content="Anschlusspunkte anzeigen"
+                                  IsChecked="True"
+                                  Checked="ShowConnectionsCheckBox_Changed"
+                                  Unchecked="ShowConnectionsCheckBox_Changed"
+                                  Margin="0,2"/>
+
+                        <CheckBox x:Name="ShowCoordinateSystemCheckBox"
+                                  Content="Koordinatensystem anzeigen"
+                                  IsChecked="True"
+                                  Checked="ShowCoordinateSystemCheckBox_Changed"
+                                  Unchecked="ShowCoordinateSystemCheckBox_Changed"
+                                  Margin="0,2"/>
+
+                        <Separator Margin="0,10"/>
+
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                            <Button Content="🔍+" Width="60" Margin="2" Click="ZoomIn_Click" ToolTip="Zoom hinein"/>
+                            <Button Content="🔍-" Width="60" Margin="2" Click="ZoomOut_Click" ToolTip="Zoom heraus"/>
+                            <Button Content="🎯" Width="60" Margin="2" Click="ResetView_Click" ToolTip="Ansicht zurücksetzen"/>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <!-- Connection Points List -->
+                <DockPanel Grid.Row="3">
+                    <Border DockPanel.Dock="Top" Background="#F5F5F5" Padding="10,5">
+                        <TextBlock Text="Anschlusspunkte" FontSize="14" FontWeight="Bold"/>
+                    </Border>
+                    <ListBox x:Name="ConnectionPointsList"
+                             ScrollViewer.VerticalScrollBarVisibility="Auto">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Margin="2">
+                                    <TextBlock FontWeight="SemiBold">
+                                        <Run Text="{Binding Index}"/>
+                                        <Run Text=": "/>
+                                        <Run Text="{Binding Name}"/>
+                                    </TextBlock>
+                                    <TextBlock FontSize="10" Foreground="Gray">
+                                        <Run Text="Position: "/>
+                                        <Run Text="{Binding Point}"/>
+                                    </TextBlock>
+                                    <TextBlock FontSize="10" Foreground="DarkBlue">
+                                        <Run Text="Richtung: "/>
+                                        <Run Text="{Binding InsertDirection}"/>
+                                    </TextBlock>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </DockPanel>
+
+                <!-- Info Panel -->
+                <Border Grid.Row="4" Background="#E3F2FD" Padding="10">
+                    <TextBlock TextWrapping="Wrap" FontSize="11">
+                        <Bold>Bedienung:</Bold><LineBreak/>
+                        • Linke Maus + Ziehen: Drehen<LineBreak/>
+                        • Mausrad: Zoomen<LineBreak/>
+                        • Mittlere Maus + Ziehen: Verschieben<LineBreak/>
+                        • Rechtsklick: Kontext-Menü
+                    </TextBlock>
+                </Border>
+            </Grid>
+        </Border>
+
+        <!-- 3D Viewport (Main Area) -->
+        <Border BorderBrush="#CCCCCC" BorderThickness="1">
+            <helix:HelixViewport3D x:Name="Viewport3D"
+                                   Background="#F0F0F0"
+                                   ShowCoordinateSystem="True"
+                                   ShowViewCube="True"
+                                   ZoomExtentsWhenLoaded="True">
+
+                <!-- Camera -->
+                <helix:HelixViewport3D.Camera>
+                    <PerspectiveCamera Position="2,2,2" LookDirection="-2,-2,-2" UpDirection="0,0,1"/>
+                </helix:HelixViewport3D.Camera>
+
+                <!-- Default Lighting -->
+                <helix:DefaultLights/>
+
+                <!-- Model Container (will be populated in code-behind) -->
+            </helix:HelixViewport3D>
+        </Border>
+    </DockPanel>
+</Window>

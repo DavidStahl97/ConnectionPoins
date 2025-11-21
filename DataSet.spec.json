@@ -1,0 +1,168 @@
+{
+  "type": "object",
+  "properties": {
+    "PartNr": {
+      "type": "string"
+    },
+    "Graphic3d": {
+      "type": "object",
+      "properties": {
+        "Points": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "X": {
+                "type": "number"
+              },
+              "Y": {
+                "type": "number"
+              },
+              "Z": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "X",
+              "Y",
+              "Z"
+            ]
+          }
+        },
+        "Indices": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          }
+        }
+      },
+      "required": [
+        "Points",
+        "Indices"
+      ]
+    },
+    "BoundingBox": {
+      "type": "object",
+      "properties": {
+        "Dimension": {
+          "type": "object",
+          "properties": {
+            "X": {
+              "type": "number"
+            },
+            "Y": {
+              "type": "number"
+            },
+            "Z": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "X",
+            "Y",
+            "Z"
+          ]
+        },
+        "Location": {
+          "type": "object",
+          "properties": {
+            "X": {
+              "type": "number"
+            },
+            "Y": {
+              "type": "number"
+            },
+            "Z": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "X",
+            "Y",
+            "Z"
+          ]
+        }
+      },
+      "required": [
+        "Dimension",
+        "Location"
+      ]
+    },
+    "ConnectionPoints": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "Index": {
+            "type": "number"
+          },
+          "Name": {
+            "type": "string"
+          },
+          "Point": {
+            "type": "object",
+            "properties": {
+              "X": {
+                "type": "number"
+              },
+              "Y": {
+                "type": "number"
+              },
+              "Z": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "X",
+              "Y",
+              "Z"
+            ]
+          },
+          "InsertDirection": {
+            "type": "object",
+            "properties": {
+              "X": {
+                "type": "number"
+              },
+              "Y": {
+                "type": "number"
+              },
+              "Z": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "X",
+              "Y",
+              "Z"
+            ]
+          }
+        },
+        "required": [
+          "Index",
+          "Name",
+          "Point",
+          "InsertDirection"
+        ]
+      }
+    },
+    "ProductTopGroup": {
+      "type": "number"
+    },
+    "ProductGroup": {
+      "type": "number"
+    },
+    "ProductSubGroup": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "PartNr",
+    "Graphic3d",
+    "BoundingBox",
+    "ConnectionPoints",
+    "ProductTopGroup",
+    "ProductGroup",
+    "ProductSubGroup"
+  ]
+}
