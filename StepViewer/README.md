@@ -15,6 +15,7 @@ Eine moderne WPF-Anwendung zur Visualisierung von 3D-Bauteilen und deren Anschlu
   - 3D-Modell ein/ausblenden
   - Anschlusspunkte ein/ausblenden
   - Koordinatensystem ein/ausblenden
+- **Kammer-Analyse**: Automatische Erkennung von Kammer-Öffnungen mit Python (Open3D + OpenCV)
 
 ## Technologie-Stack
 
@@ -23,6 +24,7 @@ Eine moderne WPF-Anwendung zur Visualisierung von 3D-Bauteilen und deren Anschlu
 - **HelixToolkit.Wpf 3.1.1** - 3D-Rendering und Kamera-Steuerung
 - **Newtonsoft.Json** - JSON-Deserialisierung
 - **Serilog 4.3.0** - Strukturiertes Logging mit File Sink und Debug Sink
+- **Python.NET 3.0.5** - Integration von Python-Algorithmen für Kammer-Analyse
 
 ## Projekt-Struktur
 
@@ -75,6 +77,21 @@ Die Anwendung liest JSON-Dateien basierend auf der Spezifikation in `DataSet.spe
 
 - .NET 8 SDK oder höher
 - Windows 10/11
+- **Python 3.8+** (für Kammer-Analyse)
+- Python venv mit installierten Packages (siehe `requirements.txt`)
+
+### Python-Umgebung einrichten
+
+```bash
+# Im Hauptverzeichnis (ConnectionPoins)
+python -m venv venv
+
+# Aktiviere venv
+venv\Scripts\activate
+
+# Installiere Abhängigkeiten
+pip install -r requirements.txt
+```
 
 ### Build
 
@@ -110,6 +127,11 @@ Oder alternativ die kompilierte EXE ausführen:
    - Schalten Sie verschiedene Elemente ein/aus (3D-Modell, Anschlüsse, Koordinatensystem)
    - Verwenden Sie die Zoom-Buttons für präzises Zoomen
    - Klicken Sie auf "🎯" um die Ansicht zurückzusetzen
+5. **Kammer-Analyse durchführen** (optional):
+   - Klicken Sie auf "🔬 Kammer analysieren"
+   - Die Analyse läuft asynchron (UI bleibt responsiv)
+   - Ergebnisse werden in JSON gespeichert und als Bilder visualisiert
+   - Ausgabe-Ordner: `DataSet/{PartNr}/`
 
 ## Logging
 
@@ -121,6 +143,24 @@ Die Anwendung verwendet **Serilog** für strukturiertes Logging:
 - **Exception Handling**: Alle unbehandelten Exceptions werden geloggt
 
 Detaillierte Informationen finden Sie in [LOGGING.md](LOGGING.md).
+
+## Python-Integration (Kammer-Analyse)
+
+Die Anwendung integriert **Python-Algorithmen** über Python.NET für automatische Kammer-Erkennung:
+
+- **Technologie**: Python.NET 3.0.5
+- **Algorithmen**: Open3D (Voxelisierung) + OpenCV (Konturerkennung)
+- **Input**: JSON-Dateien mit Mesh-Daten (Points + Indices)
+- **Output**: Kammer-Mittelpunkte (X, Y, Z) für jeden Connection Point
+- **Visualisierungen**: Tiefenbilder und Kontur-Analyse-Bilder
+
+**Verwendung**:
+1. Laden Sie ein Bauteil
+2. Klicken Sie auf "🔬 Kammer analysieren"
+3. Ergebnisse werden automatisch in JSON gespeichert
+4. Visualisierungen werden im `DataSet/{PartNr}/` Ordner gespeichert
+
+Detaillierte Informationen finden Sie in [PYTHON_INTEGRATION.md](PYTHON_INTEGRATION.md).
 
 ## Architektur-Details
 

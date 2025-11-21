@@ -46,7 +46,34 @@
 
                 <!-- Files List Header -->
                 <Border Grid.Row="0" Background="#F5F5F5" Padding="10">
-                    <TextBlock Text="Bauteile" FontSize="16" FontWeight="Bold"/>
+                    <StackPanel>
+                        <TextBlock Text="Bauteile" FontSize="16" FontWeight="Bold" Margin="0,0,0,8"/>
+                        <TextBox x:Name="SearchBox"
+                                 TextChanged="SearchBox_TextChanged"
+                                 Padding="6,4"
+                                 Background="White"
+                                 BorderBrush="#CCCCCC"
+                                 BorderThickness="1">
+                            <TextBox.Style>
+                                <Style TargetType="TextBox">
+                                    <Setter Property="Foreground" Value="Black"/>
+                                    <Style.Triggers>
+                                        <Trigger Property="Text" Value="">
+                                            <Setter Property="Background">
+                                                <Setter.Value>
+                                                    <VisualBrush Stretch="None" AlignmentX="Left">
+                                                        <VisualBrush.Visual>
+                                                            <TextBlock Text="🔍 Suchen..." Foreground="#999999" Margin="2,0,0,0"/>
+                                                        </VisualBrush.Visual>
+                                                    </VisualBrush>
+                                                </Setter.Value>
+                                            </Setter>
+                                        </Trigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBox.Style>
+                        </TextBox>
+                    </StackPanel>
                 </Border>
 
                 <!-- Files List -->
@@ -102,6 +129,42 @@
                             <Button Content="🔍-" Width="60" Margin="2" Click="ZoomOut_Click" ToolTip="Zoom heraus"/>
                             <Button Content="🎯" Width="60" Margin="2" Click="ResetView_Click" ToolTip="Ansicht zurücksetzen"/>
                         </StackPanel>
+
+                        <Separator Margin="0,10"/>
+
+                        <TextBlock Text="Analyse" FontSize="14" FontWeight="Bold" Margin="0,0,0,10"/>
+
+                        <Button x:Name="AnalyzeChamberButton"
+                                Content="🔬 Kammer analysieren"
+                                Click="AnalyzeChamber_Click"
+                                Padding="10,8"
+                                Background="#4CAF50"
+                                Foreground="White"
+                                BorderBrush="#45a049"
+                                FontWeight="SemiBold"
+                                ToolTip="Analysiert Kammer-Öffnungen mit Python"
+                                Margin="0,2">
+                            <Button.Style>
+                                <Style TargetType="Button">
+                                    <Style.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter Property="Background" Value="#45a049"/>
+                                        </Trigger>
+                                        <Trigger Property="IsEnabled" Value="False">
+                                            <Setter Property="Background" Value="#CCCCCC"/>
+                                            <Setter Property="Foreground" Value="#666666"/>
+                                        </Trigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
+
+                        <TextBlock x:Name="AnalysisStatusText"
+                                   Text=""
+                                   FontSize="10"
+                                   Foreground="Gray"
+                                   TextWrapping="Wrap"
+                                   Margin="0,5,0,0"/>
                     </StackPanel>
                 </Border>
 

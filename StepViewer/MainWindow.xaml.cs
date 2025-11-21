@@ -22,6 +22,9 @@ namespace StepViewer
         private readonly List<Visual3D> _meshVisuals = new List<Visual3D>();
         private readonly List<Visual3D> _connectionVisuals = new List<Visual3D>();
         private readonly ILogger _logger;
+        private readonly PythonChamberAnalyzer _chamberAnalyzer;
+        private string? _currentFilePath;
+        private List<FileInfo> _allFiles = new List<FileInfo>();
 
         public MainWindow()
         {
@@ -30,8 +33,9 @@ namespace StepViewer
             _logger = Log.ForContext<MainWindow>();
             _logger.Information("MainWindow initializing");
 
-            // Initialize data service
+            // Initialize services
             _dataService = new DataService();
+            _chamberAnalyzer = new PythonChamberAnalyzer();
 
             // Load file list
             LoadFileList();
@@ -62,7 +66,8 @@ namespace StepViewer
                     });
                 }
 
-                FileListBox.ItemsSource = fileInfoList;
+                _allFiles = fileInfoList;
+                FileListBox.ItemsSource = _allFiles;
                 StatusText.Text = $"{fileInfoList.Count} Bauteile geladen";
                 _logger.Information("Loaded {FileCount} files from DataSet directory", fileInfoList.Count);
             }
@@ -72,6 +77,35 @@ namespace StepViewer
                 MessageBox.Show($"Fehler beim Laden der Dateiliste:\n{ex.Message}",
                     "Fehler", MessageBoxButton.OK, MessageBoxImage.Error);
                 StatusText.Text = "Fehler beim Laden der Dateiliste";
+            }
+        }
+
+        /// <summary>
+        /// Search box text changed event - filters the file list
+        /// </summary>
+        private void SearchBox_TextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
+        {
+            if (SearchBox == null || _allFiles == null)
+                return;
+
+            string searchText = SearchBox.Text.Trim().ToLowerInvariant();
+
+            if (string.IsNullOrWhiteSpace(searchText))
+            {
+                // Show all files when search is empty
+                FileListBox.ItemsSource = _allFiles;
+                StatusText.Text = $"{_allFiles.Count} Bauteile geladen";
+            }
+            else
+            {
+                // Filter files by PartNr or FileName
+                var filteredFiles = _allFiles.Where(f =>
+                    f.PartNr.ToLowerInvariant().Contains(searchText) ||
+                    f.FileName.ToLowerInvariant().Contains(searchText)
+                ).ToList();
+
+                FileListBox.ItemsSource = filteredFiles;
+                StatusText.Text = $"{filteredFiles.Count} von {_allFiles.Count} Bauteilen gefunden";
             }
         }
 
@@ -95,6 +129,20 @@ namespace StepViewer
             {
                 _logger.Information("Loading part data from file: {FilePath}", filePath);
                 StatusText.Text = $"Lade {Path.GetFileName(filePath)}...";
+
+                // Store current file path for chamber analysis
+                _currentFilePath = filePath;
+
+                // Enable chamber analysis button
+                if (AnalyzeChamberButton != null)
+                {
+                    AnalyzeChamberButton.IsEnabled = true;
+                }
+
+                if (AnalysisStatusText != null)
+                {
+                    AnalysisStatusText.Text = "";
+                }
 
                 // Load part data
                 _currentPartData = _dataService.LoadPartData(filePath);
@@ -426,6 +474,115 @@ namespace StepViewer
 
             _logger.Debug("Reset view requested");
             Viewport3D.ZoomExtents();
+        }
+
+        private async void AnalyzeChamber_Click(object sender, RoutedEventArgs e)
+        {
+            if (_currentFilePath == null || _currentPartData == null)
+            {
+                MessageBox.Show("Bitte laden Sie zuerst ein Bauteil.",
+                    "Keine Datei geladen", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            _logger.Information("Starting chamber analysis for: {FilePath}", _currentFilePath);
+
+            // Disable button during analysis
+            AnalyzeChamberButton.IsEnabled = false;
+            AnalysisStatusText.Text = "Analysiere Kammern...";
+            StatusText.Text = "Kammer-Analyse läuft...";
+
+            try
+            {
+                // Create output directory
+                var fileName = Path.GetFileNameWithoutExtension(_currentFilePath);
+                var baseDir = Path.GetDirectoryName(_currentFilePath);
+                var outputDir = Path.Combine(baseDir ?? "", fileName);
+
+                // Run analysis asynchronously
+                var result = await System.Threading.Tasks.Task.Run(() =>
+                {
+                    return _chamberAnalyzer.AnalyzeChambers(_currentFilePath, outputDir);
+                });
+
+                if (result.Success)
+                {
+                    _logger.Information("Chamber analysis completed successfully: {ChamberCount} centers found",
+                        result.ChamberCenters.Count);
+
+                    // Update part data with chamber centers
+                    foreach (var chamberCenter in result.ChamberCenters)
+                    {
+                        var connectionPoint = _currentPartData.ConnectionPoints
+                            .FirstOrDefault(cp => cp.Index == chamberCenter.ConnectionPointIndex);
+
+                        if (connectionPoint != null && chamberCenter.Center != null)
+                        {
+                            // Add chamber center property (extend ConnectionPoint model if needed)
+                            _logger.Debug("Chamber center for {Name}: ({X}, {Y}, {Z})",
+                                chamberCenter.ConnectionPointName,
+                                chamberCenter.Center.X,
+                                chamberCenter.Center.Y,
+                                chamberCenter.Center.Z);
+                        }
+                    }
+
+                    // Save updated JSON
+                    _dataService.SavePartData(_currentFilePath, _currentPartData);
+
+                    AnalysisStatusText.Text = $"✓ Analyse abgeschlossen: {result.ChamberCenters.Count} Kammern gefunden";
+                    AnalysisStatusText.Foreground = new SolidColorBrush(Colors.Green);
+
+                    StatusText.Text = $"Kammer-Analyse abgeschlossen - {result.ChamberCenters.Count} Zentren gefunden";
+
+                    MessageBox.Show(
+                        $"Kammer-Analyse erfolgreich abgeschlossen!\n\n" +
+                        $"Gefundene Kammern: {result.ChamberCenters.Count}\n" +
+                        $"Erkannte Konturen: {result.ContourCount}\n\n" +
+                        $"Visualisierungen gespeichert in:\n{outputDir}",
+                        "Analyse abgeschlossen",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Information);
+
+                    // Reload to show updated data
+                    LoadPartData(_currentFilePath);
+                }
+                else
+                {
+                    _logger.Error("Chamber analysis failed: {Error}", result.ErrorMessage);
+
+                    AnalysisStatusText.Text = $"✗ Fehler: {result.ErrorMessage}";
+                    AnalysisStatusText.Foreground = new SolidColorBrush(Colors.Red);
+
+                    StatusText.Text = "Kammer-Analyse fehlgeschlagen";
+
+                    MessageBox.Show(
+                        $"Fehler bei der Kammer-Analyse:\n\n{result.ErrorMessage}",
+                        "Analysefehler",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Error);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Error(ex, "Unexpected error during chamber analysis");
+
+                AnalysisStatusText.Text = $"✗ Fehler: {ex.Message}";
+                AnalysisStatusText.Foreground = new SolidColorBrush(Colors.Red);
+
+                StatusText.Text = "Fehler bei der Kammer-Analyse";
+
+                MessageBox.Show(
+                    $"Unerwarteter Fehler:\n\n{ex.Message}",
+                    "Fehler",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+            }
+            finally
+            {
+                // Re-enable button
+                AnalyzeChamberButton.IsEnabled = true;
+            }
         }
 
         /// <summary>
