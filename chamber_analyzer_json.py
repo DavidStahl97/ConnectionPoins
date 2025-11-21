@@ -104,6 +104,10 @@ def analyze_chambers_from_json(json_file_path, output_dir=None):
                     part_data.get('PartNr', 'unknown')
                 )
 
+        # Speichere Analyse-Ergebnisse als JSON
+        if output_dir:
+            save_analysis_results_json(chamber_centers, output_dir, part_data.get('PartNr', 'unknown'))
+
         total_contours = len(chamber_centers)
         return {
             'success': True,
@@ -609,6 +613,28 @@ def save_visualization_for_point(depth_image, contours, cp, chamber_center, exte
     plt.close()
 
     print(f"  Saved 6 visualization images for {filename_base}")
+
+def save_analysis_results_json(chamber_centers, output_dir, part_nr):
+    """
+    Speichert die Analyse-Ergebnisse als JSON-Datei
+
+    Args:
+        chamber_centers: Liste von Chamber Center Ergebnissen
+        output_dir: Ausgabe-Verzeichnis
+        part_nr: Teil-Nummer
+    """
+    output_file = os.path.join(output_dir, f'{part_nr}_chamber_analysis_results.json')
+
+    results = {
+        'part_nr': part_nr,
+        'analysis_timestamp': __import__('datetime').datetime.now().isoformat(),
+        'chamber_centers': chamber_centers
+    }
+
+    with open(output_file, 'w', encoding='utf-8') as f:
+        json.dump(results, f, indent=2, ensure_ascii=False)
+
+    print(f"  Saved analysis results to: {output_file}")
 
 def save_visualizations(depth_image, contours, connection_points, chamber_centers, extent, output_dir, part_nr):
     """Alte Funktion - wird nicht mehr verwendet"""

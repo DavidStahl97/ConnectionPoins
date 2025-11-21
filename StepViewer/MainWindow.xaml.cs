@@ -21,6 +21,7 @@ namespace StepViewer
         private PartData? _currentPartData;
         private readonly List<Visual3D> _meshVisuals = new List<Visual3D>();
         private readonly List<Visual3D> _connectionVisuals = new List<Visual3D>();
+        private readonly List<Visual3D> _chamberVisuals = new List<Visual3D>();
         private readonly ILogger _logger;
         private readonly PythonChamberAnalyzer _chamberAnalyzer;
         private string? _currentFilePath;
@@ -209,6 +210,12 @@ namespace StepViewer
                 Viewport3D.Children.Remove(visual);
             }
             _connectionVisuals.Clear();
+
+            foreach (var visual in _chamberVisuals)
+            {
+                Viewport3D.Children.Remove(visual);
+            }
+            _chamberVisuals.Clear();
         }
 
         /// <summary>
@@ -383,6 +390,62 @@ namespace StepViewer
         }
 
         /// <summary>
+        /// Render chamber centers as green spheres
+        /// </summary>
+        private void RenderChamberCenters(List<ChamberCenter> chamberCenters)
+        {
+            // Clear existing chamber visuals
+            foreach (var visual in _chamberVisuals)
+            {
+                Viewport3D.Children.Remove(visual);
+            }
+            _chamberVisuals.Clear();
+
+            _logger.Debug("Rendering {Count} chamber centers", chamberCenters.Count);
+
+            foreach (var chamberCenter in chamberCenters)
+            {
+                if (chamberCenter.Center == null)
+                {
+                    _logger.Debug("Skipping chamber center {Name} - no center found",
+                        chamberCenter.ConnectionPointName);
+                    continue;
+                }
+
+                // Create green sphere at chamber center (smaller than connection point)
+                var sphere = new SphereVisual3D
+                {
+                    Center = new System.Windows.Media.Media3D.Point3D(
+                        chamberCenter.Center.X,
+                        chamberCenter.Center.Y,
+                        chamberCenter.Center.Z),
+                    Radius = CalculatePointRadius() * 0.8, // Slightly smaller than connection points
+                    Fill = new SolidColorBrush(Colors.LimeGreen)
+                };
+
+                Viewport3D.Children.Add(sphere);
+                _chamberVisuals.Add(sphere);
+
+                // Add label
+                var textVisual = new BillboardTextVisual3D
+                {
+                    Text = $"Chamber {chamberCenter.ConnectionPointIndex}",
+                    Position = new System.Windows.Media.Media3D.Point3D(
+                        chamberCenter.Center.X,
+                        chamberCenter.Center.Y,
+                        chamberCenter.Center.Z + CalculatePointRadius() * 2),
+                    Foreground = new SolidColorBrush(Colors.DarkGreen),
+                    FontSize = 10
+                };
+
+                Viewport3D.Children.Add(textVisual);
+                _chamberVisuals.Add(textVisual);
+            }
+
+            _logger.Information("Rendered {Count} chamber centers in 3D viewport", _chamberVisuals.Count / 2);
+        }
+
+        /// <summary>
         /// Calculate appropriate point radius based on model size
         /// </summary>
         private double CalculatePointRadius()
@@ -539,13 +602,13 @@ namespace StepViewer
                         $"Kammer-Analyse erfolgreich abgeschlossen!\n\n" +
                         $"Gefundene Kammern: {result.ChamberCenters.Count}\n" +
                         $"Erkannte Konturen: {result.ContourCount}\n\n" +
-                        $"Visualisierungen gespeichert in:\n{outputDir}",
+                        $"Visualisierungen und JSON gespeichert in:\n{outputDir}",
                         "Analyse abgeschlossen",
                         MessageBoxButton.OK,
                         MessageBoxImage.Information);
 
-                    // Reload to show updated data
-                    LoadPartData(_currentFilePath);
+                    // Render chamber centers in 3D view
+                    RenderChamberCenters(result.ChamberCenters);
                 }
                 else
                 {
