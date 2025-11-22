@@ -616,13 +616,17 @@ def detect_contours_from_depth(depth_image, object_boundary, threshold_factor=0.
     # Gradientenmagnitude
     gradient_magnitude = np.sqrt(grad_x**2 + grad_y**2)
 
-    # Erodiere valid_mask um Randpixel zu entfernen (dort sind immer hohe Gradienten)
-    # Dies entfernt Gradienten am Rand des Bauteils (wo Tiefenwerte zu NaN übergehen)
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-    valid_mask_eroded = cv2.erode(valid_mask.astype(np.uint8), kernel, iterations=2)
+    # Setze Gradienten außerhalb des Objekts (NaN-Pixel) auf 0
+    gradient_magnitude[~valid_mask] = 0
 
-    # Setze Gradienten außerhalb der erodierten Maske auf 0
-    gradient_magnitude[valid_mask_eroded == 0] = 0
+    # Erodiere valid_mask um nur die direkten Randpixel (die an NaN angrenzen) zu entfernen
+    # Dies entfernt falsche Gradienten am Rand des Bauteils (wo Tiefenwerte zu NaN übergehen)
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+    valid_mask_eroded = cv2.erode(valid_mask.astype(np.uint8), kernel, iterations=1)
+
+    # Setze Gradienten an Randpixeln (die an NaN angrenzen) auf 0
+    edge_mask = valid_mask & (valid_mask_eroded == 0)
+    gradient_magnitude[edge_mask] = 0
 
     # Schwellwert für Konturerkennung
     threshold = threshold_factor * np.max(gradient_magnitude)
@@ -782,12 +786,12 @@ def save_visualization_for_point(depth_image, contours, cp, chamber_center, exte
     filename_base = f"{part_nr}_CP{cp['Index']}_{cp['Name'].replace(' ', '_')}"
 
     valid_mask = ~np.isnan(depth_image)
-    depth_display = depth_image.copy()
-    if np.any(valid_mask):
-        depth_display[~valid_mask] = np.nanmin(depth_image)
-    else:
+    if not np.any(valid_mask):
         print(f"  Warning: No valid depth data for visualization")
         return
+
+    # Erstelle masked array - NaN-Pixel werden maskiert (transparent/weiß)
+    depth_display = np.ma.masked_invalid(depth_image)
 
     # Connection Point Position in U/V
     cp_point = cp['Point']
@@ -806,6 +810,7 @@ def save_visualization_for_point(depth_image, contours, cp, chamber_center, exte
     # 1. Tiefenbild allein
     fig, ax = plt.subplots(figsize=(10, 8), dpi=150)
     im = ax.imshow(depth_display, extent=extent, origin='lower', cmap='viridis')
+    im.cmap.set_bad(color='white')  # NaN-Pixel werden weiß dargestellt
     plt.colorbar(im, ax=ax, label='Depth')
     ax.set_xlabel('U')
     ax.set_ylabel('V')
@@ -821,16 +826,22 @@ def save_visualization_for_point(depth_image, contours, cp, chamber_center, exte
     grad_y = cv2.Sobel(depth_filled, cv2.CV_64F, 0, 1, ksize=3)
     gradient_magnitude = np.sqrt(grad_x**2 + grad_y**2)
 
-    # Erodiere valid_mask um Randpixel zu entfernen (wie in detect_contours_from_depth)
+    # Setze Gradienten außerhalb des Objekts (NaN-Pixel) auf 0
+    grad_x[~valid_mask] = 0
+    grad_y[~valid_mask] = 0
+    gradient_magnitude[~valid_mask] = 0
+
+    # Erodiere valid_mask um nur die direkten Randpixel zu entfernen
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-    valid_mask_eroded = cv2.erode(valid_mask.astype(np.uint8), kernel, iterations=2)
+    valid_mask_eroded = cv2.erode(valid_mask.astype(np.uint8), kernel, iterations=1)
 
-    # Setze Gradienten außerhalb der erodierten Maske auf 0
-    grad_x[valid_mask_eroded == 0] = 0
-    grad_y[valid_mask_eroded == 0] = 0
-    gradient_magnitude[valid_mask_eroded == 0] = 0
+    # Setze Gradienten an Randpixeln (die an NaN angrenzen) auf 0
+    edge_mask = valid_mask & (valid_mask_eroded == 0)
+    grad_x[edge_mask] = 0
+    grad_y[edge_mask] = 0
+    gradient_magnitude[edge_mask] = 0
 
-    # 3. Gradient X
+    # 2. Gradient X
     fig, ax = plt.subplots(figsize=(10, 8), dpi=150)
     im = ax.imshow(grad_x, extent=extent, origin='lower', cmap='RdBu_r')
     plt.colorbar(im, ax=ax, label='Gradient X')
@@ -840,7 +851,7 @@ def save_visualization_for_point(depth_image, contours, cp, chamber_center, exte
     plt.savefig(os.path.join(output_dir, f'{filename_base}_2_gradient_x.png'), bbox_inches='tight')
     plt.close()
 
-    # 4. Gradient Y
+    # 3. Gradient Y
     fig, ax = plt.subplots(figsize=(10, 8), dpi=150)
     im = ax.imshow(grad_y, extent=extent, origin='lower', cmap='RdBu_r')
     plt.colorbar(im, ax=ax, label='Gradient Y')
@@ -850,7 +861,7 @@ def save_visualization_for_point(depth_image, contours, cp, chamber_center, exte
     plt.savefig(os.path.join(output_dir, f'{filename_base}_3_gradient_y.png'), bbox_inches='tight')
     plt.close()
 
-    # 5. Gradient Magnitude (Länge)
+    # 4. Gradient Magnitude (Länge)
     fig, ax = plt.subplots(figsize=(10, 8), dpi=150)
     im = ax.imshow(gradient_magnitude, extent=extent, origin='lower', cmap='hot')
     plt.colorbar(im, ax=ax, label='Gradient Magnitude')
@@ -860,7 +871,7 @@ def save_visualization_for_point(depth_image, contours, cp, chamber_center, exte
     plt.savefig(os.path.join(output_dir, f'{filename_base}_4_gradient_magnitude.png'), bbox_inches='tight')
     plt.close()
 
-    # 6. Binary Image (Original - nach Thresholding, vor Schließung)
+    # 5. Binary Image (Original - nach Thresholding, vor Schließung)
     threshold = 0.1 * np.max(gradient_magnitude)
 
     fig, ax = plt.subplots(figsize=(10, 8), dpi=150)
@@ -871,7 +882,7 @@ def save_visualization_for_point(depth_image, contours, cp, chamber_center, exte
     plt.savefig(os.path.join(output_dir, f'{filename_base}_5_binary_original.png'), bbox_inches='tight')
     plt.close()
 
-    # 7. Binary Image (Geschlossen - nach Edge Closure)
+    # 6. Binary Image (Geschlossen - nach Edge Closure)
     fig, ax = plt.subplots(figsize=(10, 8), dpi=150)
     ax.imshow(binary_image_closed, extent=extent, origin='lower', cmap='gray')
     ax.set_xlabel('U')
@@ -880,7 +891,7 @@ def save_visualization_for_point(depth_image, contours, cp, chamber_center, exte
     plt.savefig(os.path.join(output_dir, f'{filename_base}_6_binary_closed.png'), bbox_inches='tight')
     plt.close()
 
-    # 8. Objektgrenze (Rand des 3D-Objekts)
+    # 7. Objektgrenze (Rand des 3D-Objekts)
     fig, ax = plt.subplots(figsize=(10, 8), dpi=150)
     ax.imshow(object_boundary, extent=extent, origin='lower', cmap='gray')
     ax.set_xlabel('U')
@@ -889,7 +900,7 @@ def save_visualization_for_point(depth_image, contours, cp, chamber_center, exte
     plt.savefig(os.path.join(output_dir, f'{filename_base}_7_object_boundary.png'), bbox_inches='tight')
     plt.close()
 
-    # 9. Kombination: Binary Original + Object Boundary
+    # 8. Kombination: Binary Original + Object Boundary
     fig, ax = plt.subplots(figsize=(10, 8), dpi=150)
 
     # Erstelle RGB-Bild: Grün für Binary Original, Rot für Object Boundary
@@ -919,9 +930,10 @@ def save_visualization_for_point(depth_image, contours, cp, chamber_center, exte
     plt.savefig(os.path.join(output_dir, f'{filename_base}_8_combined_original_boundary.png'), bbox_inches='tight')
     plt.close()
 
-    # 10. Finale Analyse mit Konturen
+    # 9. Finale Analyse mit Konturen
     fig, ax = plt.subplots(figsize=(10, 8), dpi=150)
     im = ax.imshow(depth_display, extent=extent, origin='lower', cmap='viridis', alpha=0.7)
+    im.cmap.set_bad(color='white')  # NaN-Pixel werden weiß dargestellt
     plt.colorbar(im, ax=ax, label='Depth')
 
     # Zeichne Konturen
