@@ -631,6 +631,7 @@ def create_object_boundary_mask(depth_image):
     # Rand = Pixel die in dilated sind, aber nicht in original
     # Das sind NaN-Pixel mit gültigen Nachbarn
     boundary_mask = ((valid_dilated == 1) & (valid_mask == 0)).astype(np.uint8) * 255
+    boundary_mask = cv2.dilate(boundary_mask, kernel, iterations=1)
 
     return boundary_mask
 
@@ -823,6 +824,62 @@ def calculate_chamber_centers(contours, connection_points, depth_image, extent, 
     """Alte Funktion - wird nicht mehr verwendet, für Kompatibilität behalten"""
     print("Warning: Using deprecated calculate_chamber_centers function")
     return []
+
+def plot_contours(contours, image_shape=None, title='Contours', figsize=(10, 8)):
+    """
+    Plottet Konturen mit imshow
+
+    Args:
+        contours: Liste von OpenCV Konturen
+        image_shape: Optionale Bildgröße (height, width). Wenn None, wird automatisch berechnet
+        title: Titel des Plots (optional)
+        figsize: Figure size (default: (10, 8))
+
+    Returns:
+        fig, ax: Matplotlib Figure und Axes
+    """
+    # Bestimme Bildgröße
+    if image_shape is None:
+        # Finde max Koordinaten
+        max_x, max_y = 0, 0
+        for contour in contours:
+            pts = contour.squeeze()
+            if len(pts.shape) == 2:
+                max_x = max(max_x, np.max(pts[:, 0]))
+                max_y = max(max_y, np.max(pts[:, 1]))
+        image_shape = (int(max_y) + 10, int(max_x) + 10)
+
+    # Erstelle RGB Bild
+    image = np.zeros((image_shape[0], image_shape[1], 3), dtype=np.uint8)
+
+    # BGR Farben für cv2.drawContours
+    colors_bgr = [
+        (0, 0, 255),      # Rot
+        (0, 165, 255),    # Orange
+        (0, 255, 255),    # Gelb
+        (0, 255, 0),      # Grün
+        (255, 255, 0),    # Cyan
+        (255, 0, 0),      # Blau
+        (255, 0, 255),    # Magenta
+        (203, 192, 255),  # Pink
+    ]
+
+    # Zeichne jede Kontur
+    for i, contour in enumerate(contours):
+        color = colors_bgr[i % len(colors_bgr)]
+        cv2.drawContours(image, [contour], -1, color, 2)
+
+    # Konvertiere BGR zu RGB
+    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+    fig, ax = plt.subplots(figsize=figsize, dpi=100)
+    ax.imshow(image_rgb, origin='lower')
+    ax.set_xlabel('X (Pixel)')
+    ax.set_ylabel('Y (Pixel)')
+    ax.set_title(title)
+
+    plt.tight_layout()
+    return fig, ax
 
 def save_image_simple(image_data, extent, output_path, title, xlabel='U', ylabel='V', cmap='viridis', colorbar_label=None):
     """
