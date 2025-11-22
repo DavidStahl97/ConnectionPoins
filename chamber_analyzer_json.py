@@ -105,7 +105,9 @@ def analyze_chambers_from_json(json_file_path, output_dir=None):
 
             # Optional: Speichere Visualisierung pro Connection Point
             if output_dir:
+                print(f"\nSaving visualizations to: {output_dir}")
                 os.makedirs(output_dir, exist_ok=True)
+                print(f"  Output directory created/exists: {os.path.abspath(output_dir)}")
                 save_visualization_for_point(
                     depth_image,
                     contours,
@@ -331,7 +333,10 @@ def voxels_to_depth_image_custom_direction(voxel_grid, direction_vector, connect
     depth_coords = np.dot(voxel_coords, z_axis)
 
     # Filtere Voxel: Nur die im definierten Rechteck behalten
-    mask = (u_coords >= u_min) & (u_coords <= u_max) & (v_coords >= v_min) & (v_coords <= v_max)
+    region_u_min, region_u_max = u_min, u_max
+    region_v_min, region_v_max = v_min, v_max
+
+    mask = (u_coords >= region_u_min) & (u_coords <= region_u_max) & (v_coords >= region_v_min) & (v_coords <= region_v_max)
     filtered_u_coords = u_coords[mask]
     filtered_v_coords = v_coords[mask]
     filtered_depth_coords = depth_coords[mask]
@@ -341,6 +346,13 @@ def voxels_to_depth_image_custom_direction(voxel_grid, direction_vector, connect
         return None, None
 
     print(f"  Filtered voxels: {len(filtered_u_coords)} / {len(u_coords)} ({len(filtered_u_coords)/len(u_coords)*100:.1f}%)")
+
+    # Passe extent an die tatsächlich vorhandenen Voxel an (nicht die feste Region)
+    # Damit haben wir keine NaN-Ränder links/rechts
+    u_min = filtered_u_coords.min()
+    u_max = filtered_u_coords.max()
+    v_min = filtered_v_coords.min()
+    v_max = filtered_v_coords.max()
 
     voxel_size = voxel_grid.voxel_size
     resolution_u = int(np.ceil((u_max - u_min) / voxel_size)) + 1
@@ -1017,7 +1029,7 @@ def save_analysis_results_json(chamber_centers, output_dir, part_nr):
     with open(output_file, 'w', encoding='utf-8') as f:
         json.dump(results, f, indent=2, ensure_ascii=False)
 
-    print(f"  Saved analysis results to: {output_file}")
+    print(f"  Saved analysis results to: {os.path.abspath(output_file)}")
 
 def save_visualizations(depth_image, contours, connection_points, chamber_centers, extent, output_dir, part_nr):
     """Alte Funktion - wird nicht mehr verwendet"""
@@ -1078,14 +1090,15 @@ def save_visualizations(depth_image, contours, connection_points, chamber_center
 
     print("Visualizations saved")
 
-def main():
-    """Hauptfunktion für Command Line Ausführung"""
-    if len(sys.argv) < 2:
-        print("Usage: python chamber_analyzer_json.py <json_file_path> [output_dir]")
-        sys.exit(1)
-
-    json_file = sys.argv[1]
-    output_dir = sys.argv[2] if len(sys.argv) > 2 else None
+def process_single_file(json_file, output_dir=None):
+    """Verarbeitet eine einzelne JSON-Datei"""
+    # Wenn kein output_dir angegeben, erstelle einen neben der JSON-Datei
+    if output_dir is None:
+        # Erstelle Ordner: DataSet/filename/
+        file_name = os.path.splitext(os.path.basename(json_file))[0]
+        base_dir = os.path.dirname(json_file)
+        output_dir = os.path.join(base_dir, file_name)
+        print(f"No output directory specified, using: {output_dir}")
 
     result = analyze_chambers_from_json(json_file, output_dir)
 
@@ -1096,9 +1109,52 @@ def main():
         # Ausgabe der Ergebnisse
         for cc in result['chamber_centers']:
             print(f"  {cc['connection_point_name']}: {cc['chamber_center']}")
+        return True
     else:
         print(f"\nAnalysis failed: {result.get('error', 'Unknown error')}")
-        sys.exit(1)
+        return False
+
+def main():
+    """Hauptfunktion für Command Line Ausführung"""
+    if len(sys.argv) < 2:
+        # Keine Argumente: Verarbeite alle JSON-Dateien im DataSet-Ordner
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        dataset_dir = os.path.join(script_dir, "DataSet")
+
+        if not os.path.exists(dataset_dir):
+            print(f"DataSet directory not found: {dataset_dir}")
+            print("Usage: python chamber_analyzer_json.py <json_file_path> [output_dir]")
+            print("   OR: python chamber_analyzer_json.py  (to process all files in DataSet/)")
+            sys.exit(1)
+
+        json_files = [f for f in os.listdir(dataset_dir) if f.endswith('.json')]
+
+        if not json_files:
+            print(f"No JSON files found in {dataset_dir}")
+            sys.exit(1)
+
+        print(f"Found {len(json_files)} JSON files in DataSet/")
+        print("=" * 80)
+
+        success_count = 0
+        for json_file in json_files:
+            json_path = os.path.join(dataset_dir, json_file)
+            print(f"\n\nProcessing: {json_file}")
+            print("-" * 80)
+
+            if process_single_file(json_path):
+                success_count += 1
+
+        print("\n" + "=" * 80)
+        print(f"Batch processing completed: {success_count}/{len(json_files)} successful")
+
+    else:
+        # Einzelne Datei verarbeiten
+        json_file = sys.argv[1]
+        output_dir = sys.argv[2] if len(sys.argv) > 2 else None
+
+        if not process_single_file(json_file, output_dir):
+            sys.exit(1)
 
 if __name__ == "__main__":
     main()
