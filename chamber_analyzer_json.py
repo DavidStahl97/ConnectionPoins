@@ -79,7 +79,7 @@ def analyze_chambers_from_json(json_file_path, output_dir=None):
             object_boundary = create_object_boundary_mask(depth_image)
 
             # Erkenne Konturen
-            contours, binary_image, closed_binary, hierarchy = detect_contours_from_depth(depth_image)
+            contours, binary_image, closed_binary, hierarchy = detect_contours_from_depth(depth_image, object_boundary)
 
             if not contours:
                 print(f"  Warning: No contours detected")
@@ -385,222 +385,6 @@ def voxels_to_depth_image_custom_direction(voxel_grid, direction_vector, connect
     # Gebe extent und transform_info zurück
     return depth_image, (extent, transform_info)
 
-def close_contours_at_edges(contours, image_shape):
-    """
-    Schließt Konturen die am Bildrand abgeschnitten sind
-
-    Iteriert durch alle Konturen und prüft für jeden Rand (oben, unten, links, rechts):
-    - Wenn >= 2 Pixel der Kontur an diesem Rand liegen → Verbinde sie mit einer Linie
-
-    Args:
-        contours: Liste von OpenCV Konturen
-        image_shape: (height, width) des Binary Images
-
-    Returns:
-        closed_binary: Neues Binary Image mit geschlossenen Konturen
-        new_contours: Neu erkannte Konturen
-        new_hierarchy: Hierarchie der neuen Konturen
-    """
-    height, width = image_shape
-    print(f"  Schließe Konturen am Bildrand (Image: {width}x{height})...")
-
-    # Erstelle neues Binary Image
-    closed_binary = np.zeros(image_shape, dtype=np.uint8)
-
-    closed_count = 0
-    for idx, contour in enumerate(contours):
-        # Zeichne die ursprüngliche Kontur
-        cv2.drawContours(closed_binary, [contour], -1, 255, thickness=1)
-
-        contour_points = contour.squeeze()
-        if len(contour_points.shape) == 1:
-            continue
-
-        edges_closed = []
-
-        # Finde Punkte an den Rändern (0-indexiert)
-        top_edge_mask = contour_points[:, 1] == 0
-        bottom_edge_mask = contour_points[:, 1] == height - 1
-        left_edge_mask = contour_points[:, 0] == 0
-        right_edge_mask = contour_points[:, 0] == width - 1
-
-        # Oberer Rand
-        if np.sum(top_edge_mask) >= 2:
-            top_points = contour_points[top_edge_mask]
-            x_min, x_max = top_points[:, 0].min(), top_points[:, 0].max()
-            cv2.line(closed_binary, (x_min, 0), (x_max, 0), 255, 1)
-            edges_closed.append('top')
-
-        # Unterer Rand
-        if np.sum(bottom_edge_mask) >= 2:
-            bottom_points = contour_points[bottom_edge_mask]
-            x_min, x_max = bottom_points[:, 0].min(), bottom_points[:, 0].max()
-            cv2.line(closed_binary, (x_min, height-1), (x_max, height-1), 255, 1)
-            edges_closed.append('bottom')
-
-        # Linker Rand
-        if np.sum(left_edge_mask) >= 2:
-            left_points = contour_points[left_edge_mask]
-            y_min, y_max = left_points[:, 1].min(), left_points[:, 1].max()
-            cv2.line(closed_binary, (0, y_min), (0, y_max), 255, 1)
-            edges_closed.append('left')
-
-        # Rechter Rand
-        if np.sum(right_edge_mask) >= 2:
-            right_points = contour_points[right_edge_mask]
-            y_min, y_max = right_points[:, 1].min(), right_points[:, 1].max()
-            cv2.line(closed_binary, (width-1, y_min), (width-1, y_max), 255, 1)
-            edges_closed.append('right')
-
-        if edges_closed:
-            closed_count += 1
-            print(f"    Contour {idx}: Geschlossen an Rändern: {', '.join(edges_closed)}")
-
-    print(f"  {closed_count} Konturen am Rand geschlossen")
-
-    # Erkenne Konturen neu im geschlossenen Bild
-    new_contours, new_hierarchy = cv2.findContours(
-        closed_binary,
-        cv2.RETR_TREE,
-        cv2.CHAIN_APPROX_SIMPLE
-    )
-
-    print(f"  Neue Konturen nach Schließung: {len(new_contours)}")
-
-    return closed_binary, new_contours, new_hierarchy
-
-def complete_individual_cut_contours(binary_image, contours, frame_width=5):
-    """
-    Vervollständigt einzelne abgeschnittene Konturen durch Hinzufügen eines Rahmens
-    und Verbindung nur derjenigen Randpunkte, die zur selben Kontur gehören
-
-    Args:
-        binary_image: Ursprüngliches Binärbild
-        contours: Liste der erkannten Konturen
-        frame_width: Breite des hinzuzufügenden Rahmens
-
-    Returns:
-        completed_image: Erweitertes Binärbild mit vervollständigten Konturen
-        new_contours: Neu erkannte Konturen im erweiterten Bild
-        new_hierarchy: Hierarchie der neuen Konturen
-    """
-    print(f"  Vervollständige abgeschnittene Konturen (Rahmen: {frame_width} Pixel)...")
-
-    old_height, old_width = binary_image.shape
-
-    # Erstelle erweitertes Bild mit Rahmen
-    new_height = old_height + 2 * frame_width
-    new_width = old_width + 2 * frame_width
-
-    # Neues Bild mit schwarzem Rahmen erstellen
-    completed_image = np.zeros((new_height, new_width), dtype=np.uint8)
-
-    # Ursprüngliches Bild in die Mitte setzen
-    completed_image[frame_width:frame_width + old_height,
-                   frame_width:frame_width + old_width] = binary_image
-
-    connections_made = 0
-    completed_contours = 0
-
-    # Prüfe jede Kontur einzeln auf Randabschnitte
-    for contour_idx, contour in enumerate(contours):
-        # Finde alle Randpunkte dieser spezifischen Kontur
-        edge_points_per_side = {
-            'oben': [],     # y = 0
-            'unten': [],    # y = old_height - 1
-            'links': [],    # x = 0
-            'rechts': []    # x = old_width - 1
-        }
-
-        for point in contour:
-            x, y = point[0]  # OpenCV Kontur-Format
-
-            # Prüfe ob Punkt am ursprünglichen Rand lag
-            if y == 0:  # Oberer Rand
-                edge_points_per_side['oben'].append((x + frame_width, y + frame_width))
-            elif y == old_height - 1:  # Unterer Rand
-                edge_points_per_side['unten'].append((x + frame_width, y + frame_width))
-
-            if x == 0:  # Linker Rand
-                edge_points_per_side['links'].append((x + frame_width, y + frame_width))
-            elif x == old_width - 1:  # Rechter Rand
-                edge_points_per_side['rechts'].append((x + frame_width, y + frame_width))
-
-        # Vervollständige nur diese Kontur, wenn sie Randpunkte hat
-        contour_was_completed = False
-
-        for edge_name, points in edge_points_per_side.items():
-            if len(points) >= 2:
-                contour_was_completed = True
-
-                if edge_name == 'oben':
-                    # Verbinde über die oberste Rahmenlinie
-                    y_line = frame_width - 1
-                    points.sort()  # Nach X sortieren
-                    x1, _ = points[0]   # Erster Punkt
-                    x2, _ = points[-1]  # Letzter Punkt
-
-                    # Verbindung nur zwischen erstem und letztem Punkt dieser Kontur
-                    completed_image[y_line, x1:x2+1] = 255
-                    # Verbindungslinien zu den ursprünglichen Punkten
-                    completed_image[y_line:y_line + frame_width + 1, x1] = 255
-                    completed_image[y_line:y_line + frame_width + 1, x2] = 255
-                    connections_made += 1
-
-                elif edge_name == 'unten':
-                    # Verbinde über die unterste Rahmenlinie
-                    y_line = new_height - frame_width
-                    points.sort()  # Nach X sortieren
-                    x1, _ = points[0]   # Erster Punkt
-                    x2, _ = points[-1]  # Letzter Punkt
-
-                    # Verbindung nur zwischen erstem und letztem Punkt dieser Kontur
-                    completed_image[y_line, x1:x2+1] = 255
-                    # Verbindungslinien zu den ursprünglichen Punkten
-                    completed_image[y_line - frame_width:y_line + 1, x1] = 255
-                    completed_image[y_line - frame_width:y_line + 1, x2] = 255
-                    connections_made += 1
-
-                elif edge_name == 'links':
-                    # Verbinde über die linke Rahmenlinie
-                    x_line = frame_width - 1
-                    points.sort(key=lambda p: p[1])  # Nach Y sortieren
-                    _, y1 = points[0]   # Erster Punkt
-                    _, y2 = points[-1]  # Letzter Punkt
-
-                    # Verbindung nur zwischen erstem und letztem Punkt dieser Kontur
-                    completed_image[y1:y2+1, x_line] = 255
-                    # Verbindungslinien zu den ursprünglichen Punkten
-                    completed_image[y1, x_line:x_line + frame_width + 1] = 255
-                    completed_image[y2, x_line:x_line + frame_width + 1] = 255
-                    connections_made += 1
-
-                elif edge_name == 'rechts':
-                    # Verbinde über die rechte Rahmenlinie
-                    x_line = new_width - frame_width
-                    points.sort(key=lambda p: p[1])  # Nach Y sortieren
-                    _, y1 = points[0]   # Erster Punkt
-                    _, y2 = points[-1]  # Letzter Punkt
-
-                    # Verbindung nur zwischen erstem und letztem Punkt dieser Kontur
-                    completed_image[y1:y2+1, x_line] = 255
-                    # Verbindungslinien zu den ursprünglichen Punkten
-                    completed_image[y1, x_line - frame_width:x_line + 1] = 255
-                    completed_image[y2, x_line - frame_width:x_line + 1] = 255
-                    connections_made += 1
-
-        if contour_was_completed:
-            completed_contours += 1
-
-    # Erkenne neue Konturen im erweiterten Bild mit Hierarchie
-    new_contours, new_hierarchy = cv2.findContours(completed_image, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-
-    print(f"    Vervollständigt: {completed_contours} Konturen, {connections_made} Verbindungen")
-    print(f"    Bild erweitert: {old_width}x{old_height} -> {new_width}x{new_height}")
-    print(f"    Neue Konturen: {len(new_contours)} (vorher: {len(contours)})")
-
-    return completed_image, new_contours, new_hierarchy
-
 def filter_nested_contours_with_hierarchy(filtered_contours, all_contours, hierarchy):
     """
     Entfernt verschachtelte Konturen basierend auf OpenCV Hierarchie-Information
@@ -653,6 +437,145 @@ def filter_nested_contours_with_hierarchy(filtered_contours, all_contours, hiera
 
     return outer_contours
 
+def close_contours_with_boundary(contours, object_boundary):
+    """
+    Schließt Konturen mit der Objektgrenze (object_boundary)
+
+    Logik:
+    - Für jede Kontur in binary_original:
+      - Finde Punkte, die Nachbarn der object_boundary sind
+      - Wenn >= 2 solche Punkte existieren
+      - Verbinde sie mit dem kürzesten Pfad entlang der boundary
+
+    Args:
+        contours: Liste von Konturen aus binary_original
+        object_boundary: Binary Image der Objektgrenze
+
+    Returns:
+        closed_binary: Neues Binary Image mit geschlossenen Konturen
+        new_contours: Neu erkannte Konturen
+        new_hierarchy: Hierarchie der neuen Konturen
+    """
+    print(f"  Schließe Konturen mit Objektgrenze...")
+
+    height, width = object_boundary.shape
+
+    # Erstelle neues Binary Image
+    closed_binary = np.zeros((height, width), dtype=np.uint8)
+
+    # Erkenne Konturen in object_boundary
+    boundary_contours, _ = cv2.findContours(
+        object_boundary,
+        cv2.RETR_EXTERNAL,
+        cv2.CHAIN_APPROX_NONE  # NONE für vollständige Konturen (alle Pixel)
+    )
+
+    print(f"    Found {len(boundary_contours)} boundary contours")
+
+    # Erstelle Nachbarschafts-Kernel (8-Nachbarschaft)
+    kernel_neighbor = np.array([[1, 1, 1],
+                                [1, 0, 1],
+                                [1, 1, 1]], dtype=np.uint8)
+
+    # Dilatiere object_boundary um Nachbarn zu finden
+    boundary_dilated = cv2.dilate(object_boundary, kernel_neighbor, iterations=1)
+
+    closed_count = 0
+    for idx, contour in enumerate(contours):
+        # Zeichne die ursprüngliche Kontur
+        cv2.drawContours(closed_binary, [contour], -1, 255, thickness=1)
+
+        contour_points = contour.squeeze()
+        if len(contour_points.shape) == 1:
+            continue
+
+        # Finde Punkte der Kontur, die Nachbarn der boundary sind
+        neighbor_points = []
+        neighbor_indices = []
+
+        for i, pt in enumerate(contour_points):
+            x, y = pt[0], pt[1]
+            if 0 <= y < height and 0 <= x < width:
+                # Punkt ist Nachbar wenn er in dilated ist und selbst nicht boundary ist
+                if boundary_dilated[y, x] > 0 and object_boundary[y, x] == 0:
+                    neighbor_points.append((x, y))
+                    neighbor_indices.append(i)
+
+        if len(neighbor_points) < 2:
+            continue
+
+        print(f"    Contour {idx}: {len(neighbor_points)} neighbor points to boundary")
+
+        # Finde die boundary-Kontur, die am nächsten ist
+        best_boundary = None
+        min_dist = float('inf')
+
+        for boundary_contour in boundary_contours:
+            boundary_pts = boundary_contour.squeeze()
+            if len(boundary_pts.shape) == 1:
+                continue
+
+            for np_pt in neighbor_points:
+                for bp in boundary_pts:
+                    dist = np.sqrt((np_pt[0] - bp[0])**2 + (np_pt[1] - bp[1])**2)
+                    if dist < min_dist:
+                        min_dist = dist
+                        best_boundary = boundary_pts
+
+        if best_boundary is None:
+            continue
+
+        # Projiziere neighbor_points auf die boundary
+        boundary_indices = []
+        for np_pt in neighbor_points:
+            min_dist = float('inf')
+            min_idx = 0
+            for i, bp in enumerate(best_boundary):
+                dist = np.sqrt((np_pt[0] - bp[0])**2 + (np_pt[1] - bp[1])**2)
+                if dist < min_dist:
+                    min_dist = dist
+                    min_idx = i
+            boundary_indices.append(min_idx)
+
+        # Sortiere nach boundary-Index
+        sorted_indices = sorted(boundary_indices)
+
+        # Verbinde Paare mit kürzestem Pfad
+        for i in range(len(sorted_indices) - 1):
+            idx1 = sorted_indices[i]
+            idx2 = sorted_indices[i + 1]
+
+            # Berechne beide möglichen Pfade
+            path1_len = abs(idx2 - idx1)
+            path2_len = len(best_boundary) - path1_len
+
+            # Wähle kürzeren Pfad
+            if path1_len <= path2_len:
+                path_indices = range(idx1, idx2 + 1)
+            else:
+                path_indices = list(range(idx1, len(best_boundary))) + list(range(0, idx2 + 1))
+
+            # Zeichne Pfad
+            for path_idx in path_indices:
+                x, y = best_boundary[path_idx % len(best_boundary)]
+                if 0 <= y < height and 0 <= x < width:
+                    closed_binary[y, x] = 255
+
+        closed_count += 1
+
+    print(f"  {closed_count} Konturen geschlossen mit boundary")
+
+    # Erkenne Konturen neu
+    new_contours, new_hierarchy = cv2.findContours(
+        closed_binary,
+        cv2.RETR_TREE,
+        cv2.CHAIN_APPROX_SIMPLE
+    )
+
+    print(f"  Neue Konturen nach Schließung: {len(new_contours)}")
+
+    return closed_binary, new_contours, new_hierarchy
+
 def create_object_boundary_mask(depth_image):
     """
     Erstellt Binary Mask der Objektgrenze
@@ -677,7 +600,7 @@ def create_object_boundary_mask(depth_image):
 
     return boundary_mask
 
-def detect_contours_from_depth(depth_image, threshold_factor=0.1):
+def detect_contours_from_depth(depth_image, object_boundary, threshold_factor=0.1):
     """Erkennt Konturen aus Tiefenbild mittels Gradientenanalyse"""
     print("Detecting contours from depth image")
 
@@ -719,9 +642,9 @@ def detect_contours_from_depth(depth_image, threshold_factor=0.1):
     filtered_contours = [c for c in contours if cv2.contourArea(c) >= min_contour_area]
     print(f"  After size filter (>={min_contour_area} px²): {len(filtered_contours)}")
 
-    # Schließe Konturen am Bildrand
-    closed_binary, closed_contours, closed_hierarchy = close_contours_at_edges(
-        filtered_contours, binary_image.shape
+    # Schließe Konturen mit der Objektgrenze
+    closed_binary, closed_contours, closed_hierarchy = close_contours_with_boundary(
+        filtered_contours, object_boundary
     )
 
     # Filtere kleine Konturen erneut (nach Schließung)
@@ -966,7 +889,37 @@ def save_visualization_for_point(depth_image, contours, cp, chamber_center, exte
     plt.savefig(os.path.join(output_dir, f'{filename_base}_7_object_boundary.png'), bbox_inches='tight')
     plt.close()
 
-    # 9. Finale Analyse mit Konturen
+    # 9. Kombination: Binary Original + Object Boundary
+    fig, ax = plt.subplots(figsize=(10, 8), dpi=150)
+
+    # Erstelle RGB-Bild: Grün für Binary Original, Rot für Object Boundary
+    combined_image = np.zeros((binary_image_original.shape[0], binary_image_original.shape[1], 3), dtype=np.uint8)
+
+    # Grün-Kanal: Binary Original (Konturen)
+    combined_image[:, :, 1] = binary_image_original
+
+    # Rot-Kanal: Object Boundary (Objektgrenze)
+    combined_image[:, :, 0] = object_boundary
+
+    # Überlappung wird gelb (Rot + Grün)
+    ax.imshow(combined_image, extent=extent, origin='lower')
+    ax.set_xlabel('U')
+    ax.set_ylabel('V')
+    ax.set_title(f'Combined: Original Contours (Grün) + Object Boundary (Rot) - CP{cp["Index"]}')
+
+    # Legende hinzufügen
+    from matplotlib.patches import Patch
+    legend_elements = [
+        Patch(facecolor='green', label='Binary Original (Konturen)'),
+        Patch(facecolor='red', label='Object Boundary (Rand)'),
+        Patch(facecolor='yellow', label='Überlappung')
+    ]
+    ax.legend(handles=legend_elements, loc='upper right')
+
+    plt.savefig(os.path.join(output_dir, f'{filename_base}_8_combined_original_boundary.png'), bbox_inches='tight')
+    plt.close()
+
+    # 10. Finale Analyse mit Konturen
     fig, ax = plt.subplots(figsize=(10, 8), dpi=150)
     im = ax.imshow(depth_display, extent=extent, origin='lower', cmap='viridis', alpha=0.7)
     plt.colorbar(im, ax=ax, label='Depth')
@@ -997,10 +950,10 @@ def save_visualization_for_point(depth_image, contours, cp, chamber_center, exte
     ax.set_ylabel('V')
     ax.set_title(f'Final Analysis - CP{cp["Index"]}: {cp["Name"]}\nInsertDirection: {cp.get("InsertDirection", {})}')
 
-    plt.savefig(os.path.join(output_dir, f'{filename_base}_8_final_analysis.png'), bbox_inches='tight')
+    plt.savefig(os.path.join(output_dir, f'{filename_base}_9_final_analysis.png'), bbox_inches='tight')
     plt.close()
 
-    print(f"  Saved 8 visualization images for {filename_base}")
+    print(f"  Saved 9 visualization images for {filename_base}")
 
 def save_analysis_results_json(chamber_centers, output_dir, part_nr):
     """

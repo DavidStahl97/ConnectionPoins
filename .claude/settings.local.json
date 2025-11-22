@@ -4,7 +4,10 @@
       "Bash(dotnet new:*)",
       "Bash(dotnet add:*)",
       "Bash(dotnet build:*)",
-      "Bash(dir:*)"
+      "Bash(dir:*)",
+      "Bash(git diff:*)",
+      "Bash(git restore:*)",
+      "Bash(python -m py_compile:*)"
     ],
     "deny": [],
     "ask": []
