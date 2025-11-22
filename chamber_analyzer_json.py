@@ -76,7 +76,7 @@ def analyze_chambers_from_json(json_file_path, output_dir=None):
                 continue
 
             # Erkenne Konturen
-            contours, binary_image, hierarchy = detect_contours_from_depth(depth_image)
+            contours, binary_image, closed_binary, hierarchy = detect_contours_from_depth(depth_image)
 
             if not contours:
                 print(f"  Warning: No contours detected")
@@ -110,7 +110,9 @@ def analyze_chambers_from_json(json_file_path, output_dir=None):
                     chamber_center,
                     extent,
                     output_dir,
-                    part_data.get('PartNr', 'unknown')
+                    part_data.get('PartNr', 'unknown'),
+                    binary_image,
+                    closed_binary
                 )
 
         # Speichere Analyse-Ergebnisse als JSON
@@ -374,6 +376,90 @@ def voxels_to_depth_image_custom_direction(voxel_grid, direction_vector, connect
     # Gebe extent und transform_info zurück
     return depth_image, (extent, transform_info)
 
+def close_contours_at_edges(contours, image_shape):
+    """
+    Schließt Konturen die am Bildrand abgeschnitten sind
+
+    Iteriert durch alle Konturen und prüft für jeden Rand (oben, unten, links, rechts):
+    - Wenn >= 2 Pixel der Kontur an diesem Rand liegen → Verbinde sie mit einer Linie
+
+    Args:
+        contours: Liste von OpenCV Konturen
+        image_shape: (height, width) des Binary Images
+
+    Returns:
+        closed_binary: Neues Binary Image mit geschlossenen Konturen
+        new_contours: Neu erkannte Konturen
+        new_hierarchy: Hierarchie der neuen Konturen
+    """
+    height, width = image_shape
+    print(f"  Schließe Konturen am Bildrand (Image: {width}x{height})...")
+
+    # Erstelle neues Binary Image
+    closed_binary = np.zeros(image_shape, dtype=np.uint8)
+
+    closed_count = 0
+    for idx, contour in enumerate(contours):
+        # Zeichne die ursprüngliche Kontur
+        cv2.drawContours(closed_binary, [contour], -1, 255, thickness=1)
+
+        contour_points = contour.squeeze()
+        if len(contour_points.shape) == 1:
+            continue
+
+        edges_closed = []
+
+        # Finde Punkte an den Rändern (0-indexiert)
+        top_edge_mask = contour_points[:, 1] == 0
+        bottom_edge_mask = contour_points[:, 1] == height - 1
+        left_edge_mask = contour_points[:, 0] == 0
+        right_edge_mask = contour_points[:, 0] == width - 1
+
+        # Oberer Rand
+        if np.sum(top_edge_mask) >= 2:
+            top_points = contour_points[top_edge_mask]
+            x_min, x_max = top_points[:, 0].min(), top_points[:, 0].max()
+            cv2.line(closed_binary, (x_min, 0), (x_max, 0), 255, 1)
+            edges_closed.append('top')
+
+        # Unterer Rand
+        if np.sum(bottom_edge_mask) >= 2:
+            bottom_points = contour_points[bottom_edge_mask]
+            x_min, x_max = bottom_points[:, 0].min(), bottom_points[:, 0].max()
+            cv2.line(closed_binary, (x_min, height-1), (x_max, height-1), 255, 1)
+            edges_closed.append('bottom')
+
+        # Linker Rand
+        if np.sum(left_edge_mask) >= 2:
+            left_points = contour_points[left_edge_mask]
+            y_min, y_max = left_points[:, 1].min(), left_points[:, 1].max()
+            cv2.line(closed_binary, (0, y_min), (0, y_max), 255, 1)
+            edges_closed.append('left')
+
+        # Rechter Rand
+        if np.sum(right_edge_mask) >= 2:
+            right_points = contour_points[right_edge_mask]
+            y_min, y_max = right_points[:, 1].min(), right_points[:, 1].max()
+            cv2.line(closed_binary, (width-1, y_min), (width-1, y_max), 255, 1)
+            edges_closed.append('right')
+
+        if edges_closed:
+            closed_count += 1
+            print(f"    Contour {idx}: Geschlossen an Rändern: {', '.join(edges_closed)}")
+
+    print(f"  {closed_count} Konturen am Rand geschlossen")
+
+    # Erkenne Konturen neu im geschlossenen Bild
+    new_contours, new_hierarchy = cv2.findContours(
+        closed_binary,
+        cv2.RETR_TREE,
+        cv2.CHAIN_APPROX_SIMPLE
+    )
+
+    print(f"  Neue Konturen nach Schließung: {len(new_contours)}")
+
+    return closed_binary, new_contours, new_hierarchy
+
 def complete_individual_cut_contours(binary_image, contours, frame_width=5):
     """
     Vervollständigt einzelne abgeschnittene Konturen durch Hinzufügen eines Rahmens
@@ -600,27 +686,23 @@ def detect_contours_from_depth(depth_image, threshold_factor=0.1):
     filtered_contours = [c for c in contours if cv2.contourArea(c) >= min_contour_area]
     print(f"  After size filter (>={min_contour_area} px²): {len(filtered_contours)}")
 
-    # TEMPORÄR DEAKTIVIERT: Vervollständige abgeschnittene Konturen am Rand
-    # completed_image, completed_contours, completed_hierarchy = complete_individual_cut_contours(
-    #     binary_image, filtered_contours, frame_width=5
-    # )
-    #
-    # # Filtere kleine Konturen erneut (nach Vervollständigung)
-    # completed_filtered = [c for c in completed_contours if cv2.contourArea(c) >= min_contour_area]
-    #
-    # # Filtere verschachtelte Konturen (innere Konturen entfernen)
-    # final_contours = filter_nested_contours_with_hierarchy(
-    #     completed_filtered, completed_contours, completed_hierarchy
-    # )
+    # Schließe Konturen am Bildrand
+    closed_binary, closed_contours, closed_hierarchy = close_contours_at_edges(
+        filtered_contours, binary_image.shape
+    )
 
-    # Filtere verschachtelte Konturen direkt (ohne edge completion)
+    # Filtere kleine Konturen erneut (nach Schließung)
+    closed_filtered = [c for c in closed_contours if cv2.contourArea(c) >= min_contour_area]
+
+    # Filtere verschachtelte Konturen (innere Konturen entfernen)
     final_contours = filter_nested_contours_with_hierarchy(
-        filtered_contours, contours, hierarchy
+        closed_filtered, closed_contours, closed_hierarchy
     )
 
     print(f"  Final contours: {len(final_contours)}")
 
-    return final_contours, binary_image, hierarchy
+    # Gebe beide Binary Images zurück: original und geschlossen
+    return final_contours, binary_image, closed_binary, closed_hierarchy
 
 def calculate_chamber_center_for_point(cp, contours, depth_image, extent_info, direction_vector):
     """
@@ -717,7 +799,7 @@ def calculate_chamber_centers(contours, connection_points, depth_image, extent, 
     print("Warning: Using deprecated calculate_chamber_centers function")
     return []
 
-def save_visualization_for_point(depth_image, contours, cp, chamber_center, extent_info, output_dir, part_nr):
+def save_visualization_for_point(depth_image, contours, cp, chamber_center, extent_info, output_dir, part_nr, binary_image_original, binary_image_closed):
     """
     Speichert erweiterte Visualisierungen für einen einzelnen Connection Point
 
@@ -729,6 +811,8 @@ def save_visualization_for_point(depth_image, contours, cp, chamber_center, exte
         extent_info: Tuple von (extent, transform_info)
         output_dir: Ausgabe-Verzeichnis
         part_nr: Teil-Nummer
+        binary_image_original: Binary Image vor dem Schließen
+        binary_image_closed: Binary Image nach dem Schließen
     """
     extent, transform_info = extent_info
     u_min, u_max, v_min, v_max = extent
@@ -819,19 +903,27 @@ def save_visualization_for_point(depth_image, contours, cp, chamber_center, exte
     plt.savefig(os.path.join(output_dir, f'{filename_base}_4_gradient_magnitude.png'), bbox_inches='tight')
     plt.close()
 
-    # 6. Binary Image (nach Thresholding)
+    # 6. Binary Image (Original - nach Thresholding, vor Schließung)
     threshold = 0.1 * np.max(gradient_magnitude)
-    binary_image = (gradient_magnitude > threshold).astype(np.uint8) * 255
 
     fig, ax = plt.subplots(figsize=(10, 8), dpi=150)
-    ax.imshow(binary_image, extent=extent, origin='lower', cmap='gray')
+    ax.imshow(binary_image_original, extent=extent, origin='lower', cmap='gray')
     ax.set_xlabel('U')
     ax.set_ylabel('V')
-    ax.set_title(f'Binary Image (Threshold={threshold:.2f}) - CP{cp["Index"]}')
-    plt.savefig(os.path.join(output_dir, f'{filename_base}_5_binary.png'), bbox_inches='tight')
+    ax.set_title(f'Binary Image Original (Threshold={threshold:.2f}) - CP{cp["Index"]}')
+    plt.savefig(os.path.join(output_dir, f'{filename_base}_5_binary_original.png'), bbox_inches='tight')
     plt.close()
 
-    # 7. Finale Analyse mit Konturen
+    # 7. Binary Image (Geschlossen - nach Edge Closure)
+    fig, ax = plt.subplots(figsize=(10, 8), dpi=150)
+    ax.imshow(binary_image_closed, extent=extent, origin='lower', cmap='gray')
+    ax.set_xlabel('U')
+    ax.set_ylabel('V')
+    ax.set_title(f'Binary Image Closed - CP{cp["Index"]}')
+    plt.savefig(os.path.join(output_dir, f'{filename_base}_6_binary_closed.png'), bbox_inches='tight')
+    plt.close()
+
+    # 8. Finale Analyse mit Konturen
     fig, ax = plt.subplots(figsize=(10, 8), dpi=150)
     im = ax.imshow(depth_display, extent=extent, origin='lower', cmap='viridis', alpha=0.7)
     plt.colorbar(im, ax=ax, label='Depth')
@@ -862,10 +954,10 @@ def save_visualization_for_point(depth_image, contours, cp, chamber_center, exte
     ax.set_ylabel('V')
     ax.set_title(f'Final Analysis - CP{cp["Index"]}: {cp["Name"]}\nInsertDirection: {cp.get("InsertDirection", {})}')
 
-    plt.savefig(os.path.join(output_dir, f'{filename_base}_6_final_analysis.png'), bbox_inches='tight')
+    plt.savefig(os.path.join(output_dir, f'{filename_base}_7_final_analysis.png'), bbox_inches='tight')
     plt.close()
 
-    print(f"  Saved 6 visualization images for {filename_base}")
+    print(f"  Saved 7 visualization images for {filename_base}")
 
 def save_analysis_results_json(chamber_centers, output_dir, part_nr):
     """

@@ -7,7 +7,11 @@
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal",
-            "cwd": "${workspaceFolder}"
+            "cwd": "${workspaceFolder}",
+            "python.defaultInterpreterPath": "venv/Scripts/python.exe",
+            "args": [
+                "C:\\Users\\LocalUser\\Desktop\\ConnectionPoins\\DataSet\\PXC.3036550_ElectricalTerminal_ElectricalTerminal.json"
+            ]
         }
     ]
 }
