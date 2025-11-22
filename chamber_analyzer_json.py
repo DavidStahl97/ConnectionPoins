@@ -75,11 +75,34 @@ def analyze_chambers_from_json(json_file_path, output_dir=None):
                 })
                 continue
 
+            # Erstelle Output-Dateinamen
+            filename_base = None
+            if output_dir:
+                os.makedirs(output_dir, exist_ok=True)
+                part_nr = part_data.get('PartNr', 'unknown')
+                filename_base = f"{part_nr}_CP{cp['Index']}_{cp['Name'].replace(' ', '_')}"
+
+                # Speichere Tiefenbild
+                depth_display = np.ma.masked_invalid(depth_image)
+                save_image_simple(depth_display, extent[0] if isinstance(extent, tuple) else extent,
+                                  os.path.join(output_dir, f'{filename_base}_1_depth.png'),
+                                  f'Depth Image - CP{cp["Index"]}: {cp["Name"]}', colorbar_label='Depth')
+
             # Erstelle Objektgrenze (Rand des 3D-Objekts)
             object_boundary = create_object_boundary_mask(depth_image)
 
-            # Erkenne Konturen
-            contours, binary_image, closed_binary, hierarchy = detect_contours_from_depth(depth_image, object_boundary)
+            # Speichere Object Boundary
+            if output_dir and filename_base:
+                save_image_simple(object_boundary, extent[0] if isinstance(extent, tuple) else extent,
+                                  os.path.join(output_dir, f'{filename_base}_7_object_boundary.png'),
+                                  f'Object Boundary (NaN-Rand) - CP{cp["Index"]}', cmap='gray')
+
+            # Erkenne Konturen (mit Visualisierung)
+            extent_tuple = extent[0] if isinstance(extent, tuple) else extent
+            contours, binary_image, closed_binary, hierarchy = detect_contours_from_depth(
+                depth_image, object_boundary,
+                output_dir=output_dir, filename_base=filename_base, extent=extent_tuple
+            )
 
             if not contours:
                 print(f"  Warning: No contours detected")
@@ -103,23 +126,32 @@ def analyze_chambers_from_json(json_file_path, output_dir=None):
 
             chamber_centers.append(chamber_center)
 
-            # Optional: Speichere Visualisierung pro Connection Point
-            if output_dir:
-                print(f"\nSaving visualizations to: {output_dir}")
-                os.makedirs(output_dir, exist_ok=True)
-                print(f"  Output directory created/exists: {os.path.abspath(output_dir)}")
-                save_visualization_for_point(
-                    depth_image,
-                    contours,
-                    cp,
-                    chamber_center,
-                    extent,
-                    output_dir,
-                    part_data.get('PartNr', 'unknown'),
-                    binary_image,
-                    closed_binary,
-                    object_boundary
-                )
+            # Speichere restliche Visualisierungen (combined + final analysis)
+            if output_dir and filename_base:
+                # 8. Kombination: Binary Original + Object Boundary
+                combined_image = np.zeros((binary_image.shape[0], binary_image.shape[1], 3), dtype=np.uint8)
+                combined_image[:, :, 1] = binary_image  # Grün
+                combined_image[:, :, 0] = object_boundary  # Rot
+
+                fig, ax = plt.subplots(figsize=(10, 8), dpi=150)
+                ax.imshow(combined_image, extent=extent_tuple, origin='lower')
+                ax.set_xlabel('U')
+                ax.set_ylabel('V')
+                ax.set_title(f'Combined: Original Contours (Grün) + Object Boundary (Rot) - CP{cp["Index"]}')
+                from matplotlib.patches import Patch
+                legend_elements = [
+                    Patch(facecolor='green', label='Binary Original'),
+                    Patch(facecolor='red', label='Object Boundary'),
+                    Patch(facecolor='yellow', label='Überlappung')
+                ]
+                ax.legend(handles=legend_elements, loc='upper right')
+                plt.savefig(os.path.join(output_dir, f'{filename_base}_8_combined_original_boundary.png'), bbox_inches='tight')
+                plt.close()
+                print(f"  Saved: {filename_base}_8_combined_original_boundary.png")
+
+                # 9. Finale Analyse mit Konturen
+                extent_info = extent[1] if isinstance(extent, tuple) else None
+                save_final_analysis_image(depth_image, contours, cp, chamber_center, extent_tuple, extent_info, output_dir, filename_base)
 
         # Speichere Analyse-Ergebnisse als JSON
         if output_dir:
@@ -592,6 +624,8 @@ def create_object_boundary_mask(depth_image):
 
     # Erweitere valid_mask um 1 Pixel (Dilation)
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+    print("boundary kernel")
+    print(kernel)
     valid_dilated = cv2.dilate(valid_mask.astype(np.uint8), kernel, iterations=1)
 
     # Rand = Pixel die in dilated sind, aber nicht in original
@@ -600,8 +634,15 @@ def create_object_boundary_mask(depth_image):
 
     return boundary_mask
 
-def detect_contours_from_depth(depth_image, object_boundary, threshold_factor=0.1):
-    """Erkennt Konturen aus Tiefenbild mittels Gradientenanalyse"""
+def detect_contours_from_depth(depth_image, object_boundary, threshold_factor=0.1, output_dir=None, filename_base=None, extent=None):
+    """
+    Erkennt Konturen aus Tiefenbild mittels Gradientenanalyse
+
+    Args:
+        output_dir: Verzeichnis zum Speichern der Bilder (optional)
+        filename_base: Basis-Dateiname für Bilder (optional)
+        extent: (u_min, u_max, v_min, v_max) für Visualisierung (optional)
+    """
     print("Detecting contours from depth image")
 
     # Berechne Gradienten
@@ -617,20 +658,39 @@ def detect_contours_from_depth(depth_image, object_boundary, threshold_factor=0.
     gradient_magnitude = np.sqrt(grad_x**2 + grad_y**2)
 
     # Setze Gradienten außerhalb des Objekts (NaN-Pixel) auf 0
+    grad_x[~valid_mask] = 0
+    grad_y[~valid_mask] = 0
     gradient_magnitude[~valid_mask] = 0
 
-    # Erodiere valid_mask um nur die direkten Randpixel (die an NaN angrenzen) zu entfernen
-    # Dies entfernt falsche Gradienten am Rand des Bauteils (wo Tiefenwerte zu NaN übergehen)
+    # Finde Pixel die direkt an NaN angrenzen (Object Boundary Rand-Pixel)
+    # Dilatiere die NaN-Maske, um Nachbarn zu finden
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-    valid_mask_eroded = cv2.erode(valid_mask.astype(np.uint8), kernel, iterations=1)
+    invalid_mask = ~valid_mask
+    invalid_dilated = cv2.dilate(invalid_mask.astype(np.uint8), kernel, iterations=1)
 
-    # Setze Gradienten an Randpixeln (die an NaN angrenzen) auf 0
-    edge_mask = valid_mask & (valid_mask_eroded == 0)
-    gradient_magnitude[edge_mask] = 0
+    # Randpixel = gültige Pixel die an NaN angrenzen
+    #edge_mask = valid_mask & (invalid_dilated == 1)
+    #grad_x[edge_mask] = 0
+    #grad_y[edge_mask] = 0
+    #gradient_magnitude[edge_mask] = 0
+
+    # Speichere Gradienten-Bilder
+    if output_dir and filename_base and extent:
+        save_image_simple(grad_x, extent, os.path.join(output_dir, f'{filename_base}_2_gradient_x.png'),
+                          f'Gradient X', cmap='RdBu_r', colorbar_label='Gradient X')
+        save_image_simple(grad_y, extent, os.path.join(output_dir, f'{filename_base}_3_gradient_y.png'),
+                          f'Gradient Y', cmap='RdBu_r', colorbar_label='Gradient Y')
+        save_image_simple(gradient_magnitude, extent, os.path.join(output_dir, f'{filename_base}_4_gradient_magnitude.png'),
+                          f'Gradient Magnitude', cmap='hot', colorbar_label='Gradient Magnitude')
 
     # Schwellwert für Konturerkennung
     threshold = threshold_factor * np.max(gradient_magnitude)
     binary_image = (gradient_magnitude > threshold).astype(np.uint8) * 255
+
+    # Speichere Binary Original
+    if output_dir and filename_base and extent:
+        save_image_simple(binary_image, extent, os.path.join(output_dir, f'{filename_base}_5_binary_original.png'),
+                          f'Binary Image Original (Threshold={threshold:.2f})', cmap='gray')
 
     # Erkenne Konturen
     contours, hierarchy = cv2.findContours(
@@ -650,6 +710,11 @@ def detect_contours_from_depth(depth_image, object_boundary, threshold_factor=0.
     closed_binary, closed_contours, closed_hierarchy = close_contours_with_boundary(
         filtered_contours, object_boundary
     )
+
+    # Speichere Binary Closed
+    if output_dir and filename_base and extent:
+        save_image_simple(closed_binary, extent, os.path.join(output_dir, f'{filename_base}_6_binary_closed.png'),
+                          f'Binary Image Closed', cmap='gray')
 
     # Filtere kleine Konturen erneut (nach Schließung)
     closed_filtered = [c for c in closed_contours if cv2.contourArea(c) >= min_contour_area]
@@ -759,6 +824,100 @@ def calculate_chamber_centers(contours, connection_points, depth_image, extent, 
     print("Warning: Using deprecated calculate_chamber_centers function")
     return []
 
+def save_image_simple(image_data, extent, output_path, title, xlabel='U', ylabel='V', cmap='viridis', colorbar_label=None):
+    """
+    Speichert ein einzelnes Bild
+
+    Args:
+        image_data: 2D numpy array (kann masked array sein)
+        extent: (u_min, u_max, v_min, v_max)
+        output_path: Vollständiger Pfad für Output-Datei
+        title: Titel des Plots
+        xlabel, ylabel: Achsenbeschriftungen
+        cmap: Colormap
+        colorbar_label: Label für Colorbar (optional)
+    """
+    fig, ax = plt.subplots(figsize=(10, 8), dpi=150)
+    im = ax.imshow(image_data, extent=extent, origin='lower', cmap=cmap)
+
+    # Setze NaN-Farbe auf weiß wenn masked array
+    if hasattr(image_data, 'mask'):
+        im.cmap.set_bad(color='white')
+
+    if colorbar_label:
+        plt.colorbar(im, ax=ax, label=colorbar_label)
+
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    ax.set_title(title)
+    plt.savefig(output_path, bbox_inches='tight')
+    plt.close()
+    print(f"  Saved: {os.path.basename(output_path)}")
+
+def save_final_analysis_image(depth_image, contours, cp, chamber_center, extent, extent_info, output_dir, filename_base):
+    """
+    Speichert finale Analyse-Visualisierung mit Konturen, CP und Chamber Center
+    """
+    # Erstelle masked array für Depth Image
+    depth_display = np.ma.masked_invalid(depth_image)
+
+    # Berechne Connection Point Position in U/V
+    u_min, u_max, v_min, v_max = extent
+    if extent_info:
+        u_axis = extent_info['u_axis']
+        v_axis = extent_info['v_axis']
+        voxel_size = extent_info['voxel_size']
+
+        cp_point = cp['Point']
+        cp_world = np.array([cp_point['X'], cp_point['Y'], cp_point['Z']])
+        cp_u = np.dot(cp_world, u_axis)
+        cp_v = np.dot(cp_world, v_axis)
+
+        # Chamber Center Position
+        cc_u, cc_v = None, None
+        if chamber_center.get('chamber_center') is not None:
+            cc = chamber_center['chamber_center']
+            cc_world = np.array([cc['X'], cc['Y'], cc['Z']])
+            cc_u = np.dot(cc_world, u_axis)
+            cc_v = np.dot(cc_world, v_axis)
+    else:
+        cp_u = cp_v = None
+        cc_u = cc_v = None
+
+    fig, ax = plt.subplots(figsize=(10, 8), dpi=150)
+    im = ax.imshow(depth_display, extent=extent, origin='lower', cmap='viridis', alpha=0.7)
+    im.cmap.set_bad(color='white')
+    plt.colorbar(im, ax=ax, label='Depth')
+
+    # Zeichne Konturen
+    colors = ['red', 'orange', 'yellow', 'green', 'cyan', 'blue', 'magenta', 'pink']
+    if extent_info:
+        for i, contour in enumerate(contours):
+            contour_squeezed = contour.squeeze()
+            if len(contour_squeezed.shape) == 1:
+                continue
+
+            contour_u = u_min + contour_squeezed[:, 0] * voxel_size
+            contour_v = v_min + contour_squeezed[:, 1] * voxel_size
+
+            color = colors[i % len(colors)]
+            ax.plot(contour_u, contour_v, color=color, linewidth=2)
+
+    # Zeichne Connection Point und Chamber Center
+    if cp_u is not None and cp_v is not None:
+        ax.plot(cp_u, cp_v, 'ro', markersize=12, markeredgecolor='white', markeredgewidth=2, zorder=10)
+
+    if cc_u is not None and cc_v is not None:
+        ax.plot(cc_u, cc_v, 'g^', markersize=14, markeredgecolor='white', markeredgewidth=2, zorder=10)
+
+    ax.set_xlabel('U')
+    ax.set_ylabel('V')
+    ax.set_title(f'Final Analysis - CP{cp["Index"]}: {cp["Name"]}')
+
+    plt.savefig(os.path.join(output_dir, f'{filename_base}_9_final_analysis.png'), bbox_inches='tight')
+    plt.close()
+    print(f"  Saved: {filename_base}_9_final_analysis.png")
+
 def save_visualization_for_point(depth_image, contours, cp, chamber_center, extent_info, output_dir, part_nr, binary_image_original, binary_image_closed, object_boundary):
     """
     Speichert erweiterte Visualisierungen für einen einzelnen Connection Point
@@ -831,12 +990,13 @@ def save_visualization_for_point(depth_image, contours, cp, chamber_center, exte
     grad_y[~valid_mask] = 0
     gradient_magnitude[~valid_mask] = 0
 
-    # Erodiere valid_mask um nur die direkten Randpixel zu entfernen
+    # Finde Pixel die direkt an NaN angrenzen (Object Boundary Rand-Pixel)
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-    valid_mask_eroded = cv2.erode(valid_mask.astype(np.uint8), kernel, iterations=1)
+    invalid_mask = ~valid_mask
+    invalid_dilated = cv2.dilate(invalid_mask.astype(np.uint8), kernel, iterations=1)
 
-    # Setze Gradienten an Randpixeln (die an NaN angrenzen) auf 0
-    edge_mask = valid_mask & (valid_mask_eroded == 0)
+    # Randpixel = gültige Pixel die an NaN angrenzen
+    edge_mask = valid_mask & (invalid_dilated == 1)
     grad_x[edge_mask] = 0
     grad_y[edge_mask] = 0
     gradient_magnitude[edge_mask] = 0
