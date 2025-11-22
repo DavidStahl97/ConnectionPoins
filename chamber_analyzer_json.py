@@ -333,10 +333,7 @@ def voxels_to_depth_image_custom_direction(voxel_grid, direction_vector, connect
     depth_coords = np.dot(voxel_coords, z_axis)
 
     # Filtere Voxel: Nur die im definierten Rechteck behalten
-    region_u_min, region_u_max = u_min, u_max
-    region_v_min, region_v_max = v_min, v_max
-
-    mask = (u_coords >= region_u_min) & (u_coords <= region_u_max) & (v_coords >= region_v_min) & (v_coords <= region_v_max)
+    mask = (u_coords >= u_min) & (u_coords <= u_max) & (v_coords >= v_min) & (v_coords <= v_max)
     filtered_u_coords = u_coords[mask]
     filtered_v_coords = v_coords[mask]
     filtered_depth_coords = depth_coords[mask]
@@ -347,12 +344,8 @@ def voxels_to_depth_image_custom_direction(voxel_grid, direction_vector, connect
 
     print(f"  Filtered voxels: {len(filtered_u_coords)} / {len(u_coords)} ({len(filtered_u_coords)/len(u_coords)*100:.1f}%)")
 
-    # Passe extent an die tatsächlich vorhandenen Voxel an (nicht die feste Region)
-    # Damit haben wir keine NaN-Ränder links/rechts
-    u_min = filtered_u_coords.min()
-    u_max = filtered_u_coords.max()
-    v_min = filtered_v_coords.min()
-    v_max = filtered_v_coords.max()
+    # Behalte die feste Region (10mm x 10mm), auch wenn dort NaN-Ränder sind
+    # u_min, u_max, v_min, v_max bleiben wie oben definiert (cp ± region_size/2)
 
     voxel_size = voxel_grid.voxel_size
     resolution_u = int(np.ceil((u_max - u_min) / voxel_size)) + 1
