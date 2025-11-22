@@ -75,6 +75,9 @@ def analyze_chambers_from_json(json_file_path, output_dir=None):
                 })
                 continue
 
+            # Erstelle Objektgrenze (Rand des 3D-Objekts)
+            object_boundary = create_object_boundary_mask(depth_image)
+
             # Erkenne Konturen
             contours, binary_image, closed_binary, hierarchy = detect_contours_from_depth(depth_image)
 
@@ -112,7 +115,8 @@ def analyze_chambers_from_json(json_file_path, output_dir=None):
                     output_dir,
                     part_data.get('PartNr', 'unknown'),
                     binary_image,
-                    closed_binary
+                    closed_binary,
+                    object_boundary
                 )
 
         # Speichere Analyse-Ergebnisse als JSON
@@ -644,6 +648,30 @@ def filter_nested_contours_with_hierarchy(filtered_contours, all_contours, hiera
 
     return outer_contours
 
+def create_object_boundary_mask(depth_image):
+    """
+    Erstellt Binary Mask der Objektgrenze
+
+    Objektgrenze = Pixel die NaN sind, aber mindestens einen Nachbarn mit Wert haben
+
+    Args:
+        depth_image: 2D numpy array mit Tiefenwerten (NaN für leere Pixel)
+
+    Returns:
+        boundary_mask: Binary Image (255 = Rand, 0 = Rest)
+    """
+    valid_mask = ~np.isnan(depth_image)
+
+    # Erweitere valid_mask um 1 Pixel (Dilation)
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+    valid_dilated = cv2.dilate(valid_mask.astype(np.uint8), kernel, iterations=1)
+
+    # Rand = Pixel die in dilated sind, aber nicht in original
+    # Das sind NaN-Pixel mit gültigen Nachbarn
+    boundary_mask = ((valid_dilated == 1) & (valid_mask == 0)).astype(np.uint8) * 255
+
+    return boundary_mask
+
 def detect_contours_from_depth(depth_image, threshold_factor=0.1):
     """Erkennt Konturen aus Tiefenbild mittels Gradientenanalyse"""
     print("Detecting contours from depth image")
@@ -799,7 +827,7 @@ def calculate_chamber_centers(contours, connection_points, depth_image, extent, 
     print("Warning: Using deprecated calculate_chamber_centers function")
     return []
 
-def save_visualization_for_point(depth_image, contours, cp, chamber_center, extent_info, output_dir, part_nr, binary_image_original, binary_image_closed):
+def save_visualization_for_point(depth_image, contours, cp, chamber_center, extent_info, output_dir, part_nr, binary_image_original, binary_image_closed, object_boundary):
     """
     Speichert erweiterte Visualisierungen für einen einzelnen Connection Point
 
@@ -813,6 +841,7 @@ def save_visualization_for_point(depth_image, contours, cp, chamber_center, exte
         part_nr: Teil-Nummer
         binary_image_original: Binary Image vor dem Schließen
         binary_image_closed: Binary Image nach dem Schließen
+        object_boundary: Binary Image der Objektgrenze (Rand)
     """
     extent, transform_info = extent_info
     u_min, u_max, v_min, v_max = extent
@@ -923,7 +952,16 @@ def save_visualization_for_point(depth_image, contours, cp, chamber_center, exte
     plt.savefig(os.path.join(output_dir, f'{filename_base}_6_binary_closed.png'), bbox_inches='tight')
     plt.close()
 
-    # 8. Finale Analyse mit Konturen
+    # 8. Objektgrenze (Rand des 3D-Objekts)
+    fig, ax = plt.subplots(figsize=(10, 8), dpi=150)
+    ax.imshow(object_boundary, extent=extent, origin='lower', cmap='gray')
+    ax.set_xlabel('U')
+    ax.set_ylabel('V')
+    ax.set_title(f'Object Boundary (NaN-Rand) - CP{cp["Index"]}')
+    plt.savefig(os.path.join(output_dir, f'{filename_base}_7_object_boundary.png'), bbox_inches='tight')
+    plt.close()
+
+    # 9. Finale Analyse mit Konturen
     fig, ax = plt.subplots(figsize=(10, 8), dpi=150)
     im = ax.imshow(depth_display, extent=extent, origin='lower', cmap='viridis', alpha=0.7)
     plt.colorbar(im, ax=ax, label='Depth')
@@ -954,10 +992,10 @@ def save_visualization_for_point(depth_image, contours, cp, chamber_center, exte
     ax.set_ylabel('V')
     ax.set_title(f'Final Analysis - CP{cp["Index"]}: {cp["Name"]}\nInsertDirection: {cp.get("InsertDirection", {})}')
 
-    plt.savefig(os.path.join(output_dir, f'{filename_base}_7_final_analysis.png'), bbox_inches='tight')
+    plt.savefig(os.path.join(output_dir, f'{filename_base}_8_final_analysis.png'), bbox_inches='tight')
     plt.close()
 
-    print(f"  Saved 7 visualization images for {filename_base}")
+    print(f"  Saved 8 visualization images for {filename_base}")
 
 def save_analysis_results_json(chamber_centers, output_dir, part_nr):
     """
