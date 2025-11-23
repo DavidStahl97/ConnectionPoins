@@ -367,6 +367,213 @@ def save_all_layer_images(voxel_array, output_dir, step_name, z_start=0, z_end=N
     return saved_files
 
 
+def find_connection_point_2d(connection_point_3d, bounds, grid_shape):
+    """
+    Konvertiert 3D Anschlusspunkt zu 2D Koordinaten im Layer-Bild
+
+    Args:
+        connection_point_3d: 3D Position (dict mit x, y, z)
+        bounds: (x_min, x_max, y_min, y_max, z_min, z_max)
+        grid_shape: (nx, ny, nz)
+
+    Returns:
+        (x_2d, y_2d): 2D Pixel-Koordinaten im Layer-Bild
+    """
+    x_min, x_max, y_min, y_max, z_min, z_max = bounds
+
+    # Normalisiere X und Y Koordinaten
+    x_normalized = (connection_point_3d['x'] - x_min) / (x_max - x_min)
+    y_normalized = (connection_point_3d['y'] - y_min) / (y_max - y_min)
+
+    # Konvertiere zu Pixel-Koordinaten
+    x_2d = int(x_normalized * (grid_shape[0] - 1))
+    y_2d = int(y_normalized * (grid_shape[1] - 1))
+
+    # Clamp zu gültigem Bereich
+    x_2d = max(0, min(grid_shape[0] - 1, x_2d))
+    y_2d = max(0, min(grid_shape[1] - 1, y_2d))
+
+    return (x_2d, y_2d)
+
+
+def investigate_layer(voxel_array, z_level, boundary_image, connection_point_2d, verbose=False):
+    """
+    Untersucht ein Layer, um zu prüfen ob es eine potenzielle Kammeröffnung ist
+
+    Algorithmus:
+    1. Layer mit Boundary verschmelzen (merge)
+    2. FloodFill vom Anschlusspunkt aus
+    3. Analysiere Rand: wie viel % ist Kammer vs. Boundary
+    4. Wenn > 50% Kammer → potenzielle Öffnung
+
+    Args:
+        voxel_array: 3D boolean array
+        z_level: Z-Level des zu untersuchenden Layers
+        boundary_image: 2D Boundary-Bild (uint8, 0 oder 255)
+        connection_point_2d: (x, y) 2D Koordinaten des Anschlusspunkts
+        verbose: Debug-Ausgaben aktivieren
+
+    Returns:
+        is_potential_opening: True wenn > 50% Kammer
+        chamber_percentage: Prozentsatz der Kammer am Rand
+        filled_image: FloodFill-Ergebnis (für Visualisierung)
+    """
+    # 1. Extrahiere Layer
+    layer_image = extract_2d_layer(voxel_array, z_level)
+    if layer_image is None:
+        return False, 0.0, None
+
+    # 2. Verschmelze Layer mit Boundary (logisches ODER)
+    # Boundary schließt offene Kammern
+    merged = cv2.bitwise_or(layer_image, boundary_image)
+
+    # 3. FloodFill von Anschlusspunkt aus
+    # Erstelle Maske für FloodFill (muss 2 Pixel größer sein)
+    h, w = merged.shape
+    mask = np.zeros((h + 2, w + 2), np.uint8)
+
+    # Kopiere merged für FloodFill (wird verändert)
+    filled = merged.copy()
+
+    # Seed-Point für FloodFill
+    seed_point = (connection_point_2d[0], connection_point_2d[1])
+
+    # FloodFill ausführen
+    # newVal=128 (grau) um gefüllte Bereiche zu markieren
+    cv2.floodFill(filled, mask, seed_point, 128, loDiff=0, upDiff=0,
+                  flags=cv2.FLOODFILL_MASK_ONLY | (255 << 8))
+
+    # Extrahiere gefüllte Region aus Maske (ohne Rand)
+    filled_mask = mask[1:-1, 1:-1]
+
+    # 4. Finde Rand der gefüllten Region
+    # Verwende morphologische Operation: Rand = Dilation - Original
+    kernel = np.ones((3, 3), np.uint8)
+    dilated_filled = cv2.dilate(filled_mask, kernel, iterations=1)
+    edge_mask = cv2.bitwise_and(dilated_filled, cv2.bitwise_not(filled_mask))
+
+    # 5. Analysiere Rand: wie viel ist Kammer (layer) vs. Boundary
+    edge_pixels = edge_mask > 0
+    total_edge_pixels = edge_pixels.sum()
+
+    if total_edge_pixels == 0:
+        if verbose:
+            print(f"  Layer {z_level}: Keine Randpixel gefunden")
+        return False, 0.0, filled_mask
+
+    # Zähle wie viele Randpixel zur Kammer (layer_image) gehören
+    # vs. wie viele nur zur Boundary gehören
+    chamber_edge_pixels = cv2.bitwise_and(layer_image, edge_mask)
+    chamber_count = (chamber_edge_pixels > 0).sum()
+
+    # Prozentsatz der Kammer am Rand
+    chamber_percentage = (chamber_count / total_edge_pixels) * 100.0
+
+    # 6. Entscheide: > 50% Kammer → potenzielle Öffnung
+    is_potential_opening = chamber_percentage > 50.0
+
+    if verbose:
+        print(f"  Layer {z_level}: Rand-Pixel={total_edge_pixels}, "
+              f"Kammer-Pixel={chamber_count}, "
+              f"Kammer%={chamber_percentage:.1f}% → "
+              f"{'ÖFFNUNG' if is_potential_opening else 'geschlossen'}")
+
+    return is_potential_opening, chamber_percentage, filled_mask
+
+
+def binary_search_opening(voxel_array, boundary_image, connection_point_2d,
+                         z_start, z_end, verbose=True):
+    """
+    Binary Search um das beste Layer (höchste potenzielle Öffnung) zu finden
+
+    Algorithmus:
+    1. Start mit max layer (z_end)
+    2. Wenn max layer = Öffnung → fertig
+    3. Sonst rekursiv:
+       - Wenn Öffnung → suche Mitte zwischen aktuellem und oberem Layer
+       - Wenn nicht → suche Mitte zwischen unterem und aktuellem Layer
+    4. Die letzte gefundene potenzielle Öffnung ist die finale Öffnung
+
+    Args:
+        voxel_array: 3D boolean array
+        boundary_image: 2D Boundary-Bild
+        connection_point_2d: (x, y) 2D Koordinaten
+        z_start: Untere Grenze (Anschlusspunkt-Level)
+        z_end: Obere Grenze (Max Level)
+        verbose: Debug-Ausgaben
+
+    Returns:
+        opening_z_level: Z-Level der Kammeröffnung (oder None)
+        investigated_layers: Liste von (z_level, is_opening, percentage)
+    """
+    print(f"\nStarte Binary Search für Kammeröffnung...")
+    print(f"  Bereich: Layer {z_start} (Anschluss) bis {z_end} (Max)")
+
+    # Speichere alle untersuchten Layer
+    investigated_layers = []
+
+    # Letzte gefundene potenzielle Öffnung
+    last_opening_z = None
+    last_opening_percentage = 0.0
+
+    # Binary Search Grenzen
+    lower = z_start
+    upper = z_end
+
+    iteration = 0
+    max_iterations = int(np.ceil(np.log2(z_end - z_start + 1))) + 5  # Sicherheitsgrenze
+
+    while lower <= upper and iteration < max_iterations:
+        iteration += 1
+
+        # Wähle mittleren Layer (oder upper beim ersten Durchlauf)
+        if iteration == 1:
+            current_z = upper  # Start mit max layer
+        else:
+            current_z = (lower + upper) // 2
+
+        if verbose:
+            print(f"\nIteration {iteration}: Untersuche Layer {current_z} (Bereich: {lower}-{upper})")
+
+        # Untersuche Layer
+        is_opening, percentage, _ = investigate_layer(
+            voxel_array, current_z, boundary_image, connection_point_2d, verbose=verbose
+        )
+
+        investigated_layers.append((current_z, is_opening, percentage))
+
+        # Wenn Öffnung gefunden, speichere als letzte Öffnung
+        if is_opening:
+            last_opening_z = current_z
+            last_opening_percentage = percentage
+
+            # Wenn erstes Layer (max) schon Öffnung ist → fertig
+            if iteration == 1:
+                if verbose:
+                    print(f"\n→ Max Layer {current_z} ist bereits Öffnung! Suche beendet.")
+                break
+
+            # Suche weiter nach oben (zwischen current und upper)
+            lower = current_z + 1
+            if verbose:
+                print(f"→ Öffnung gefunden! Suche weiter nach oben: {lower}-{upper}")
+        else:
+            # Keine Öffnung → suche nach unten (zwischen lower und current)
+            upper = current_z - 1
+            if verbose:
+                print(f"→ Keine Öffnung. Suche weiter nach unten: {lower}-{upper}")
+
+    # Ergebnis
+    if last_opening_z is not None:
+        print(f"\n✓ Kammeröffnung gefunden bei Layer {last_opening_z}")
+        print(f"  Kammer-Anteil am Rand: {last_opening_percentage:.1f}%")
+        print(f"  Untersuchte Layers: {len(investigated_layers)}")
+    else:
+        print(f"\n✗ Keine Kammeröffnung gefunden (alle Layers geschlossen)")
+
+    return last_opening_z, investigated_layers
+
+
 def visualize_layers_overview(voxel_array, output_dir, step_name, z_start, z_end, sample_count=16):
     """
     Erstellt Übersichts-Visualisierung mit mehreren Layer-Samples
@@ -412,6 +619,97 @@ def visualize_layers_overview(voxel_array, output_dir, step_name, z_start, z_end
     plt.close()
 
     print(f"Layer-Übersicht gespeichert: {overview_filename}")
+
+
+def visualize_binary_search_results(voxel_array, boundary_image, connection_point_2d,
+                                    investigated_layers, opening_z_level,
+                                    output_dir, step_name):
+    """
+    Visualisiert die Binary Search Ergebnisse
+
+    Args:
+        voxel_array: 3D boolean array
+        boundary_image: 2D Boundary-Bild
+        connection_point_2d: (x, y) 2D Koordinaten
+        investigated_layers: Liste von (z_level, is_opening, percentage)
+        opening_z_level: Gefundene Öffnungs-Z-Level
+        output_dir: Ausgabe-Verzeichnis
+        step_name: Name für Dateibenennungen
+    """
+    print("Erstelle Binary Search Visualisierung...")
+
+    # Sortiere investigated_layers nach z_level
+    investigated_layers_sorted = sorted(investigated_layers, key=lambda x: x[0])
+
+    # Erstelle Subplot: 2 Zeilen
+    # Zeile 1: Untersuchte Layers
+    # Zeile 2: Graph mit Prozentsätzen
+    n_layers = len(investigated_layers_sorted)
+    fig = plt.figure(figsize=(20, 10))
+
+    # Zeile 1: Untersuchte Layers (max 8 Layers)
+    display_count = min(8, n_layers)
+    for i in range(display_count):
+        z_level, is_opening, percentage = investigated_layers_sorted[i]
+
+        # Erstelle Subplot
+        ax = plt.subplot(2, display_count, i + 1)
+
+        # Layer + FloodFill Visualisierung
+        layer_image = extract_2d_layer(voxel_array, z_level)
+        _, _, filled_mask = investigate_layer(voxel_array, z_level, boundary_image,
+                                             connection_point_2d, verbose=False)
+
+        # Kombiniere Layer (grau) und FloodFill (rot)
+        display_image = np.zeros((*layer_image.shape, 3), dtype=np.uint8)
+        display_image[:, :, 0] = layer_image  # R
+        display_image[:, :, 1] = layer_image  # G
+        display_image[:, :, 2] = layer_image  # B
+
+        # FloodFill in Rot
+        if filled_mask is not None:
+            display_image[filled_mask > 0] = [255, 100, 100]
+
+        # Markiere Anschlusspunkt
+        cv2.circle(display_image, connection_point_2d, 3, (0, 255, 0), -1)
+
+        ax.imshow(display_image, origin='lower')
+        title_color = 'green' if is_opening else 'red'
+        status = 'ÖFFNUNG' if is_opening else 'geschlossen'
+        ax.set_title(f'Layer {z_level}\n{percentage:.1f}% - {status}',
+                    color=title_color, fontweight='bold')
+        ax.axis('off')
+
+    # Zeile 2: Graph mit allen Prozentsätzen
+    ax_graph = plt.subplot(2, 1, 2)
+
+    z_levels = [x[0] for x in investigated_layers_sorted]
+    percentages = [x[2] for x in investigated_layers_sorted]
+    colors = ['green' if x[1] else 'red' for x in investigated_layers_sorted]
+
+    ax_graph.bar(z_levels, percentages, color=colors, alpha=0.7, edgecolor='black')
+    ax_graph.axhline(y=50, color='blue', linestyle='--', linewidth=2, label='50% Schwelle')
+
+    if opening_z_level is not None:
+        ax_graph.axvline(x=opening_z_level, color='darkgreen', linestyle='-',
+                        linewidth=3, label=f'Öffnung bei Layer {opening_z_level}')
+
+    ax_graph.set_xlabel('Layer Z-Level', fontsize=12, fontweight='bold')
+    ax_graph.set_ylabel('Kammer-Anteil am Rand (%)', fontsize=12, fontweight='bold')
+    ax_graph.set_title('Binary Search Ergebnisse: Kammer-Prozentsatz pro Layer',
+                      fontsize=14, fontweight='bold')
+    ax_graph.legend()
+    ax_graph.grid(True, alpha=0.3)
+    ax_graph.set_ylim([0, 105])
+
+    plt.tight_layout()
+
+    # Speichere Visualisierung
+    output_filename = os.path.join(output_dir, f"{step_name}_binary_search_results.png")
+    plt.savefig(output_filename, dpi=150, bbox_inches='tight')
+    plt.close()
+
+    print(f"Binary Search Visualisierung gespeichert: {output_filename}")
 
 
 def process_connection_point(json_file, connection_point_id=None):
@@ -506,7 +804,36 @@ def process_connection_point(json_file, connection_point_id=None):
         # 10. Erstelle Übersichts-Visualisierung
         visualize_layers_overview(voxel_array, output_dir, f"{json_name}_P{vector['id']}", z_start, z_end, sample_count=16)
 
-        print(f"\n[OK] Erfolgreich verarbeitet: {len(saved_files)} Layer-Bilder erstellt")
+        # 11. Konvertiere Anschlusspunkt zu 2D Koordinaten
+        connection_point_2d = find_connection_point_2d(rotated_connection_dict, bounds, grid_shape)
+        print(f"\nAnschlusspunkt 2D: ({connection_point_2d[0]}, {connection_point_2d[1]})")
+
+        # 12. Binary Search für Kammeröffnung
+        opening_z_level, investigated_layers = binary_search_opening(
+            voxel_array, boundary_image, connection_point_2d,
+            z_start, z_end, verbose=True
+        )
+
+        # 13. Visualisiere Binary Search Ergebnisse
+        visualize_binary_search_results(
+            voxel_array, boundary_image, connection_point_2d,
+            investigated_layers, opening_z_level,
+            output_dir, f"{json_name}_P{vector['id']}"
+        )
+
+        # Zusammenfassung
+        print(f"\n{'='*60}")
+        print(f"ZUSAMMENFASSUNG")
+        print(f"{'='*60}")
+        print(f"Layer-Bilder: {len(saved_files)} gespeichert")
+        print(f"Untersuchte Layers (Binary Search): {len(investigated_layers)}")
+        if opening_z_level is not None:
+            print(f"Kammeröffnung: Layer {opening_z_level}")
+        else:
+            print(f"Kammeröffnung: Nicht gefunden")
+        print(f"{'='*60}")
+
+        print(f"\n[OK] Erfolgreich verarbeitet")
         return True
 
     except Exception as e:
