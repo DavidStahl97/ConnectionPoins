@@ -19,9 +19,8 @@ import open3d as o3d
 import matplotlib.pyplot as plt
 import cv2
 from scipy.spatial.transform import Rotation
-from ipyfilechooser import FileChooser
-from IPython.display import display
-import ipywidgets as widgets
+import tkinter as tk
+from tkinter import filedialog
 
 print("✓ Alle Module erfolgreich importiert")
 
@@ -29,23 +28,28 @@ print("✓ Alle Module erfolgreich importiert")
 ## 2. JSON-Datei auswählen
 
 # %%
-json_chooser = FileChooser(
-    path='Data',
-    filename='',
-    title='<b>JSON-Datei mit 3D-Daten auswählen</b>',
-    show_hidden=False,
-    select_default=False,
-    filter_pattern=['*.json']
+# Erstelle verstecktes Tkinter-Fenster für Dateiauswahl
+root = tk.Tk()
+root.withdraw()  # Verstecke das Hauptfenster
+root.attributes('-topmost', True)  # Bringe Dialog in den Vordergrund
+
+# Öffne Dateiauswahl-Dialog
+json_file = filedialog.askopenfilename(
+    title='JSON-Datei mit 3D-Daten auswählen',
+    initialdir='DataSet',
+    filetypes=[
+        ('JSON Dateien', '*.json'),
+        ('Alle Dateien', '*.*')
+    ]
 )
 
-display(json_chooser)
+root.destroy()  # Schließe Tkinter
 
-# %%
-json_file = json_chooser.selected
-print(f"JSON-Datei: {json_file}")
-
-if not json_file:
-    print("⚠ Bitte wählen Sie eine JSON-Datei aus!")
+if json_file:
+    print(f"✓ Ausgewählte Datei: {json_file}")
+else:
+    print("⚠ Keine Datei ausgewählt!")
+    raise ValueError("Keine JSON-Datei ausgewählt")
 
 # %% [markdown]
 ## 3. Hilfsfunktionen (Basis)
@@ -245,19 +249,37 @@ o3d.visualization.draw_geometries(geometries, window_name="Original Mesh", width
 ## 6. Anschlusspunkt auswählen
 
 # %%
+# Zeige verfügbare Anschlusspunkte und wähle einen aus
 if vectors:
-    dropdown = widgets.Dropdown(
-        options=[(f"P{v['id']} - {v['name']}", v['id']) for v in vectors],
-        description='Anschlusspunkt:',
-        style={'description_width': 'initial'}
-    )
-    display(dropdown)
+    print("\n" + "="*60)
+    print("ANSCHLUSSPUNKT AUSWÄHLEN")
+    print("="*60)
+    for idx, v in enumerate(vectors):
+        print(f"  [{idx}] P{v['id']}: {v['name']} - Pos: ({v['position']['x']:.4f}, {v['position']['y']:.4f}, {v['position']['z']:.4f})")
+    print("="*60)
+
+    # Eingabe vom Benutzer
+    while True:
+        try:
+            selection = input(f"Wähle Anschlusspunkt [0-{len(vectors)-1}]: ")
+            selected_idx = int(selection)
+            if 0 <= selected_idx < len(vectors):
+                break
+            else:
+                print(f"⚠ Bitte eine Zahl zwischen 0 und {len(vectors)-1} eingeben!")
+        except ValueError:
+            print("⚠ Bitte eine gültige Zahl eingeben!")
+
+    selected_vector_id = vectors[selected_idx]['id']
+    print(f"✓ Ausgewählt: P{selected_vector_id} - {vectors[selected_idx]['name']}")
+else:
+    raise ValueError("Keine Anschlusspunkte in JSON-Datei gefunden!")
 
 # %% [markdown]
 ## 7. Mesh-Rotation
 
 # %%
-vector = next((v for v in vectors if v['id'] == dropdown.value), None)
+vector = next((v for v in vectors if v['id'] == selected_vector_id), None)
 
 if vector:
     print(f"\nVerarbeite P{vector['id']} - {vector['name']}")
