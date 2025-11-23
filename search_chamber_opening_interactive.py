@@ -448,8 +448,12 @@ plt.show()
 # %%
 def find_connection_point_2d(connection_point_3d, bounds, grid_shape):
     """Konvertiert 3D Anschlusspunkt zu 2D Koordinaten im Layer-Bild"""
+    print("\n=== DEBUG find_connection_point_2d ===")
+
     # bounds format: (x_min, y_min, z_min, x_max, y_max, z_max)
     x_min, y_min, z_min, x_max, y_max, z_max = bounds
+    print(f"bounds (unpacked): x_min={x_min:.4f}, y_min={y_min:.4f}, z_min={z_min:.4f}")
+    print(f"                   x_max={x_max:.4f}, y_max={y_max:.4f}, z_max={z_max:.4f}")
 
     # Handle connection point as dict or array
     if isinstance(connection_point_3d, dict):
@@ -458,30 +462,41 @@ def find_connection_point_2d(connection_point_3d, bounds, grid_shape):
     else:
         x, y = connection_point_3d[0], connection_point_3d[1]
 
+    print(f"connection_point_3d: x={x:.4f}, y={y:.4f}")
+
     # Normalize to [0, 1]
     x_range = x_max - x_min
     y_range = y_max - y_min
+    print(f"ranges: x_range={x_range:.4f}, y_range={y_range:.4f}")
 
     if x_range == 0 or y_range == 0:
-        print(f"⚠ Warnung: Bounds haben keine Ausdehnung! x_range={x_range}, y_range={y_range}")
+        print(f"⚠ Warnung: Bounds haben keine Ausdehnung!")
         return (grid_shape[0] // 2, grid_shape[1] // 2)
 
     x_normalized = (x - x_min) / x_range
     y_normalized = (y - y_min) / y_range
+    print(f"normalized: x_normalized={x_normalized:.4f}, y_normalized={y_normalized:.4f}")
 
     # Convert to pixel coordinates
+    print(f"grid_shape: {grid_shape}")
+    print(f"  grid_shape[0] = {grid_shape[0]} (wird für x_2d verwendet)")
+    print(f"  grid_shape[1] = {grid_shape[1]} (wird für y_2d verwendet)")
+
     x_2d = int(x_normalized * (grid_shape[0] - 1))
     y_2d = int(y_normalized * (grid_shape[1] - 1))
+    print(f"BERECHNET: x_2d={x_2d}, y_2d={y_2d}")
 
     # Clamp to valid range
-    x_2d = max(0, min(grid_shape[0] - 1, x_2d))
-    y_2d = max(0, min(grid_shape[1] - 1, y_2d))
+    x_2d_clamped = max(0, min(grid_shape[0] - 1, x_2d))
+    y_2d_clamped = max(0, min(grid_shape[1] - 1, y_2d))
 
-    print(f"  3D Punkt: ({x:.4f}, {y:.4f}) → 2D Pixel: ({x_2d}, {y_2d})")
-    print(f"  Bounds: X=[{x_min:.4f}, {x_max:.4f}], Y=[{y_min:.4f}, {y_max:.4f}]")
-    print(f"  Grid Shape: {grid_shape}")
+    if x_2d != x_2d_clamped or y_2d != y_2d_clamped:
+        print(f"⚠ CLAMPING: ({x_2d}, {y_2d}) → ({x_2d_clamped}, {y_2d_clamped})")
 
-    return (x_2d, y_2d)
+    print(f"RÜCKGABE: ({x_2d_clamped}, {y_2d_clamped})")
+    print("=== END DEBUG ===\n")
+
+    return (x_2d_clamped, y_2d_clamped)
 
 def investigate_layer(voxel_array, z_level, boundary_image, connection_point_2d, verbose=False):
     """
@@ -492,14 +507,34 @@ def investigate_layer(voxel_array, z_level, boundary_image, connection_point_2d,
     if layer_image is None:
         return False, 0.0, None
 
+    if verbose:
+        print(f"  DEBUG investigate_layer:")
+        print(f"    layer_image.shape = {layer_image.shape}")
+        print(f"    boundary_image.shape = {boundary_image.shape}")
+
     # Verschmelze Layer mit Boundary
     merged = cv2.bitwise_or(layer_image, boundary_image)
 
     # FloodFill
     h, w = merged.shape
+    if verbose:
+        print(f"    merged.shape = {merged.shape} → h={h}, w={w}")
+
     mask = np.zeros((h + 2, w + 2), np.uint8)
     filled = merged.copy()
     seed_point = (connection_point_2d[0], connection_point_2d[1])
+
+    if verbose:
+        print(f"    seed_point = {seed_point}")
+        print(f"    Valid range: x ∈ [0, {w-1}], y ∈ [0, {h-1}]")
+        print(f"    Is valid? x={seed_point[0]} in [0,{w-1}]: {0 <= seed_point[0] < w}")
+        print(f"              y={seed_point[1]} in [0,{h-1}]: {0 <= seed_point[1] < h}")
+
+    # Prüfe ob seed_point gültig ist
+    if not (0 <= seed_point[0] < w and 0 <= seed_point[1] < h):
+        print(f"  ⚠ FEHLER: seed_point {seed_point} außerhalb von Bildgrenzen [{w} x {h}]!")
+        return False, 0.0, None
+
     cv2.floodFill(filled, mask, seed_point, 128, loDiff=0, upDiff=0,
                   flags=cv2.FLOODFILL_MASK_ONLY | (255 << 8))
     filled_mask = mask[1:-1, 1:-1]
