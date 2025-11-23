@@ -206,10 +206,6 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
-# Data folder - contains STEP files, JSON files and analysis images
-Data/
-DataSet/
-
 # Application log files
 **/Logs/
 *.log
@@ -609,3 +605,8 @@ FodyWeavers.xsd
 # JetBrains Rider
 *.sln.iml
 .idea/
+
+
+# Data folder - contains STEP files, JSON files and analysis images
+Data/
+DataSet/
