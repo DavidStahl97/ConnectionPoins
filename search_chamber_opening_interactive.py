@@ -478,9 +478,10 @@ def find_connection_point_2d(connection_point_3d, bounds, grid_shape):
     print(f"normalized: x_normalized={x_normalized:.4f}, y_normalized={y_normalized:.4f}")
 
     # Convert to pixel coordinates
+    # voxel_array ist (nx, ny, nz) - direkte Zuordnung zu X und Y Weltkoordinaten
     print(f"grid_shape: {grid_shape}")
-    print(f"  grid_shape[0] = {grid_shape[0]} (wird für x_2d verwendet)")
-    print(f"  grid_shape[1] = {grid_shape[1]} (wird für y_2d verwendet)")
+    print(f"  grid_shape[0] = {grid_shape[0]} → für X verwenden")
+    print(f"  grid_shape[1] = {grid_shape[1]} → für Y verwenden")
 
     x_2d = int(x_normalized * (grid_shape[0] - 1))
     y_2d = int(y_normalized * (grid_shape[1] - 1))
@@ -509,11 +510,22 @@ def investigate_layer(voxel_array, z_level, boundary_image, connection_point_2d,
 
     if verbose:
         print(f"  DEBUG investigate_layer:")
-        print(f"    layer_image.shape = {layer_image.shape}")
-        print(f"    boundary_image.shape = {boundary_image.shape}")
+        print(f"    layer_image.shape (vorher) = {layer_image.shape}")
+        print(f"    boundary_image.shape (vorher) = {boundary_image.shape}")
+
+    # Transponiere die Arrays für OpenCV (x, y) Konvention
+    # voxel_array[:, :, z] gibt (nx, ny) array
+    # Für OpenCV seed_point=(x, y) brauchen wir array[y, x]
+    # Also transponieren: (nx, ny) → (ny, nx)
+    layer_image = layer_image.T
+    boundary_image_transposed = boundary_image.T
+
+    if verbose:
+        print(f"    layer_image.shape (nachher) = {layer_image.shape}")
+        print(f"    boundary_image.shape (nachher) = {boundary_image_transposed.shape}")
 
     # Verschmelze Layer mit Boundary
-    merged = cv2.bitwise_or(layer_image, boundary_image)
+    merged = cv2.bitwise_or(layer_image, boundary_image_transposed)
 
     # FloodFill
     h, w = merged.shape
@@ -551,7 +563,8 @@ def investigate_layer(voxel_array, z_level, boundary_image, connection_point_2d,
     if total_edge_pixels == 0:
         if verbose:
             print(f"  Layer {z_level}: Keine Randpixel gefunden")
-        return False, 0.0, filled_mask
+        # Transponiere zurück zur ursprünglichen Orientierung
+        return False, 0.0, filled_mask.T
 
     chamber_edge_pixels = cv2.bitwise_and(layer_image, edge_mask)
     chamber_count = (chamber_edge_pixels > 0).sum()
@@ -563,7 +576,11 @@ def investigate_layer(voxel_array, z_level, boundary_image, connection_point_2d,
               f"Kammer={chamber_count}, {chamber_percentage:.1f}% → "
               f"{'ÖFFNUNG' if is_potential_opening else 'geschlossen'}")
 
-    return is_potential_opening, chamber_percentage, filled_mask
+    # Transponiere filled_mask zurück zur ursprünglichen Orientierung
+    # damit sie mit dem nicht-transponierten layer_image in der Visualisierung passt
+    filled_mask_original = filled_mask.T
+
+    return is_potential_opening, chamber_percentage, filled_mask_original
 
 def binary_search_opening(voxel_array, boundary_image, connection_point_2d,
                          z_start, z_end, verbose=True):
