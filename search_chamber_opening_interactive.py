@@ -84,33 +84,69 @@ def load_json_data(json_file_path):
     print(f"✓ ConnectionPoints: {len(vectors)} Anschlusspunkte")
     return mesh, vectors
 
-def rotate_mesh_to_align_vector(mesh, direction_vector, target_direction=np.array([0, 0, 1])):
-    if isinstance(direction_vector, dict):
-        dir_vec = np.array([direction_vector['x'], direction_vector['y'], direction_vector['z']])
+def create_transformation_matrix(connection_point, connection_vector):
+    """
+    Erstellt 4x4 Transformationsmatrix:
+    - Anschlusspunkt wird zum Ursprung (0, 0, 0)
+    - Anschlussvektor wird zur Z-Achse (0, 0, 1)
+
+    Args:
+        connection_point: dict mit x, y, z oder np.array
+        connection_vector: dict mit x, y, z oder np.array
+
+    Returns:
+        transformation_matrix: 4x4 numpy array
+    """
+    # Konvertiere zu numpy arrays
+    if isinstance(connection_point, dict):
+        pos = np.array([connection_point['x'], connection_point['y'], connection_point['z']])
     else:
-        dir_vec = np.array(direction_vector)
+        pos = np.array(connection_point)
 
-    dir_vec = dir_vec / np.linalg.norm(dir_vec)
-    target_direction = target_direction / np.linalg.norm(target_direction)
-    rotation_axis = np.cross(dir_vec, target_direction)
-    rotation_axis_norm = np.linalg.norm(rotation_axis)
-
-    if rotation_axis_norm < 1e-6:
-        if np.dot(dir_vec, target_direction) > 0:
-            return mesh.copy(), np.eye(4)
-        rotation_axis = np.array([1, 0, 0]) if abs(dir_vec[0]) < 0.9 else np.array([0, 1, 0])
-        rotation_angle = np.pi
+    if isinstance(connection_vector, dict):
+        vec = np.array([connection_vector['x'], connection_vector['y'], connection_vector['z']])
     else:
-        rotation_axis = rotation_axis / rotation_axis_norm
-        rotation_angle = np.arccos(np.clip(np.dot(dir_vec, target_direction), -1.0, 1.0))
+        vec = np.array(connection_vector)
 
-    rotation = Rotation.from_rotvec(rotation_angle * rotation_axis)
-    rotation_matrix = np.eye(4)
-    rotation_matrix[:3, :3] = rotation.as_matrix()
-    rotated_mesh = mesh.copy()
-    rotated_mesh.apply_transform(rotation_matrix)
-    print(f"✓ Mesh rotiert: Winkel = {np.degrees(rotation_angle):.2f}°")
-    return rotated_mesh, rotation_matrix
+    # Normalisiere Anschlussvektor -> wird zur Z-Achse
+    z_axis = vec / np.linalg.norm(vec)
+
+    # Finde orthogonale X-Achse
+    # Wähle einen Vektor der nicht parallel zu z_axis ist
+    if abs(z_axis[0]) < 0.9:
+        arbitrary = np.array([1.0, 0.0, 0.0])
+    else:
+        arbitrary = np.array([0.0, 1.0, 0.0])
+
+    # X-Achse = arbitrary × z_axis (normalisiert)
+    x_axis = np.cross(arbitrary, z_axis)
+    x_axis = x_axis / np.linalg.norm(x_axis)
+
+    # Y-Achse = z_axis × x_axis (ergibt orthonormales System)
+    y_axis = np.cross(z_axis, x_axis)
+
+    # Erstelle Rotationsmatrix (Spaltenvektoren sind die neuen Achsen)
+    # Dies ist die Basis-Transformation VOM lokalen Koordinatensystem ZUM Welt-System
+    # Wir brauchen die Inverse: VOM Welt-System ZUM lokalen System
+    rotation_matrix = np.column_stack([x_axis, y_axis, z_axis])
+
+    # Die inverse Rotation (Weltkoordinaten -> lokales System)
+    # Bei orthonormalen Matrizen: inverse = transpose
+    rotation_inv = rotation_matrix.T
+
+    # Erstelle 4x4 Transformationsmatrix
+    # Erst Translation (verschiebe Anschlusspunkt zum Ursprung), dann Rotation
+    transformation = np.eye(4)
+    transformation[:3, :3] = rotation_inv
+    transformation[:3, 3] = -rotation_inv @ pos  # Verschiebe Position zum Ursprung
+
+    print(f"✓ Transformation erstellt:")
+    print(f"  - Z-Achse: {z_axis}")
+    print(f"  - X-Achse: {x_axis}")
+    print(f"  - Y-Achse: {y_axis}")
+    print(f"  - Translation: {-pos}")
+
+    return transformation
 
 def mesh_to_voxels(mesh, voxel_resolution=800):
     o3d_mesh = o3d.geometry.TriangleMesh()
@@ -276,59 +312,74 @@ else:
     raise ValueError("Keine Anschlusspunkte in JSON-Datei gefunden!")
 
 # %% [markdown]
-## 7. Mesh-Rotation
+## 7. Mesh-Transformation (Translation + Rotation)
 
 # %%
 vector = next((v for v in vectors if v['id'] == selected_vector_id), None)
 
 if vector:
     print(f"\nVerarbeite P{vector['id']} - {vector['name']}")
-    rotated_mesh, rotation_matrix = rotate_mesh_to_align_vector(mesh, vector['direction'])
 
-    cp_world = np.array([vector['position']['x'], vector['position']['y'], vector['position']['z'], 1.0])
-    rotated_cp = rotation_matrix @ cp_world
-    rotated_connection_dict = {'x': rotated_cp[0], 'y': rotated_cp[1], 'z': rotated_cp[2]}
+    # Erstelle Transformationsmatrix
+    # Anschlusspunkt -> Ursprung, Anschlussvektor -> Z-Achse
+    transformation_matrix = create_transformation_matrix(
+        vector['position'],
+        vector['direction']
+    )
+
+    # Wende Transformation auf Mesh an
+    transformed_mesh = mesh.copy()
+    transformed_mesh.apply_transform(transformation_matrix)
+
+    # Nach Transformation: Anschlusspunkt ist bei (0, 0, 0)
+    rotated_connection_dict = {'x': 0.0, 'y': 0.0, 'z': 0.0}
+
+    print(f"✓ Mesh transformiert:")
+    print(f"  - Anschlusspunkt ist jetzt bei: (0, 0, 0)")
+    print(f"  - Anschlussvektor ist jetzt: (0, 0, 1)")
 
 # %% [markdown]
-## 8. Visualisierung: Rotiertes Mesh mit ausgewähltem Anschlusspunkt
+## 8. Visualisierung: Transformiertes Mesh
 
 # %%
-o3d_rotated = o3d.geometry.TriangleMesh()
-o3d_rotated.vertices = o3d.utility.Vector3dVector(rotated_mesh.vertices)
-o3d_rotated.triangles = o3d.utility.Vector3iVector(rotated_mesh.faces)
-o3d_rotated.compute_vertex_normals()
-o3d_rotated.paint_uniform_color([0.5, 0.7, 0.9])
+o3d_transformed = o3d.geometry.TriangleMesh()
+o3d_transformed.vertices = o3d.utility.Vector3dVector(transformed_mesh.vertices)
+o3d_transformed.triangles = o3d.utility.Vector3iVector(transformed_mesh.faces)
+o3d_transformed.compute_vertex_normals()
+o3d_transformed.paint_uniform_color([0.5, 0.7, 0.9])
 
-# Koordinatensystem
+# Berechne Mesh-Größe für Skalierung
+mesh_size = max(transformed_mesh.bounds[1] - transformed_mesh.bounds[0])
+
+# Koordinatensystem am Ursprung
 coord_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(
-    size=max(rotated_mesh.bounds[1] - rotated_mesh.bounds[0]) * 0.3, origin=[0,0,0])
+    size=mesh_size * 0.3, origin=[0, 0, 0])
 
-# Anschlusspunkt als rote Kugel
-sphere = o3d.geometry.TriangleMesh.create_sphere(
-    radius=max(rotated_mesh.bounds[1] - rotated_mesh.bounds[0]) * 0.02)
-sphere.translate([rotated_connection_dict['x'], rotated_connection_dict['y'], rotated_connection_dict['z']])
+# Anschlusspunkt als rote Kugel (jetzt am Ursprung)
+sphere = o3d.geometry.TriangleMesh.create_sphere(radius=mesh_size * 0.02)
+sphere.translate([0.0, 0.0, 0.0])  # Am Ursprung
 sphere.paint_uniform_color([1.0, 0.0, 0.0])
 
-# Anschlussvektor (zeigt jetzt in Z-Richtung nach Rotation)
-arrow_start = np.array([rotated_connection_dict['x'], rotated_connection_dict['y'], rotated_connection_dict['z']])
-arrow_end = arrow_start + np.array([0, 0, max(rotated_mesh.bounds[1] - rotated_mesh.bounds[0]) * 0.15])
+# Anschlussvektor (zeigt jetzt exakt in Z-Richtung)
+arrow_start = np.array([0.0, 0.0, 0.0])
+arrow_end = np.array([0.0, 0.0, mesh_size * 0.15])
 line_set = o3d.geometry.LineSet()
 line_set.points = o3d.utility.Vector3dVector([arrow_start, arrow_end])
 line_set.lines = o3d.utility.Vector2iVector([[0, 1]])
 line_set.colors = o3d.utility.Vector3dVector([[1.0, 0.0, 0.0]])
 
-print("\nZeige rotiertes Mesh:")
-print("  - Rote Kugel: Anschlusspunkt")
-print("  - Rote Linie: Insertionsrichtung (jetzt in Z-Richtung)")
-print("  - RGB-Achsen: Koordinatensystem")
-o3d.visualization.draw_geometries([o3d_rotated, coord_frame, sphere, line_set],
-                                  window_name="Rotiertes Mesh", width=1024, height=768)
+print("\nZeige transformiertes Mesh:")
+print("  - Rote Kugel: Anschlusspunkt (jetzt am Ursprung 0,0,0)")
+print("  - Rote Linie: Insertionsrichtung (Z-Achse 0,0,1)")
+print("  - RGB-Achsen: Neues Koordinatensystem")
+o3d.visualization.draw_geometries([o3d_transformed, coord_frame, sphere, line_set],
+                                  window_name="Transformiertes Mesh", width=1024, height=768)
 
 # %% [markdown]
 ## 9. Voxelisierung und Boundary
 
 # %%
-voxel_grid, voxel_size = mesh_to_voxels(rotated_mesh, voxel_resolution=800)
+voxel_grid, voxel_size = mesh_to_voxels(transformed_mesh, voxel_resolution=800)
 voxel_array, bounds, grid_shape = extract_voxel_grid_as_3d_array(voxel_grid)
 
 if voxel_array is not None:

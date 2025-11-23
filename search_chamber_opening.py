@@ -82,67 +82,69 @@ def load_json_data(json_file_path):
     return mesh, vectors
 
 
-def rotate_mesh_to_align_vector(mesh, direction_vector, target_direction=np.array([0, 0, 1])):
+def create_transformation_matrix(connection_point, connection_vector):
     """
-    Rotiert das Mesh so, dass der Anschlussvektor in Richtung target_direction zeigt
+    Erstellt 4x4 Transformationsmatrix:
+    - Anschlusspunkt wird zum Ursprung (0, 0, 0)
+    - Anschlussvektor wird zur Z-Achse (0, 0, 1)
 
     Args:
-        mesh: trimesh Mesh-Objekt
-        direction_vector: Richtungsvektor der in Z-Richtung zeigen soll (als dict oder array)
-        target_direction: Zielrichtung (default: [0, 0, 1])
+        connection_point: dict mit x, y, z oder np.array
+        connection_vector: dict mit x, y, z oder np.array
 
     Returns:
-        rotated_mesh: Rotiertes Mesh
-        rotation_matrix: Die verwendete Rotationsmatrix
+        transformation_matrix: 4x4 numpy array
     """
-    # Konvertiere direction_vector zu numpy array falls nötig
-    if isinstance(direction_vector, dict):
-        dir_vec = np.array([direction_vector['x'], direction_vector['y'], direction_vector['z']])
+    # Konvertiere zu numpy arrays
+    if isinstance(connection_point, dict):
+        pos = np.array([connection_point['x'], connection_point['y'], connection_point['z']])
     else:
-        dir_vec = np.array(direction_vector)
+        pos = np.array(connection_point)
 
-    # Normalisiere Vektoren
-    dir_vec = dir_vec / np.linalg.norm(dir_vec)
-    target_direction = target_direction / np.linalg.norm(target_direction)
-
-    # Berechne Rotationsachse (Kreuzprodukt)
-    rotation_axis = np.cross(dir_vec, target_direction)
-    rotation_axis_norm = np.linalg.norm(rotation_axis)
-
-    # Prüfe ob Vektoren bereits parallel sind
-    if rotation_axis_norm < 1e-6:
-        # Vektoren sind bereits parallel
-        if np.dot(dir_vec, target_direction) > 0:
-            # Gleiche Richtung - keine Rotation nötig
-            print("Anschlussvektor zeigt bereits in Z-Richtung, keine Rotation nötig")
-            return mesh.copy(), np.eye(4)
-        else:
-            # Entgegengesetzte Richtung - 180° Rotation um beliebige orthogonale Achse
-            rotation_axis = np.array([1, 0, 0]) if abs(dir_vec[0]) < 0.9 else np.array([0, 1, 0])
-            rotation_angle = np.pi
+    if isinstance(connection_vector, dict):
+        vec = np.array([connection_vector['x'], connection_vector['y'], connection_vector['z']])
     else:
-        # Normalisiere Rotationsachse
-        rotation_axis = rotation_axis / rotation_axis_norm
+        vec = np.array(connection_vector)
 
-        # Berechne Rotationswinkel
-        rotation_angle = np.arccos(np.clip(np.dot(dir_vec, target_direction), -1.0, 1.0))
+    # Normalisiere Anschlussvektor -> wird zur Z-Achse
+    z_axis = vec / np.linalg.norm(vec)
 
-    # Erstelle Rotationsmatrix mit scipy
-    rotation = Rotation.from_rotvec(rotation_angle * rotation_axis)
-    rotation_matrix_3x3 = rotation.as_matrix()
+    # Finde orthogonale X-Achse
+    # Wähle einen Vektor der nicht parallel zu z_axis ist
+    if abs(z_axis[0]) < 0.9:
+        arbitrary = np.array([1.0, 0.0, 0.0])
+    else:
+        arbitrary = np.array([0.0, 1.0, 0.0])
 
-    # Konvertiere zu 4x4 Transformationsmatrix
-    rotation_matrix = np.eye(4)
-    rotation_matrix[:3, :3] = rotation_matrix_3x3
+    # X-Achse = arbitrary × z_axis (normalisiert)
+    x_axis = np.cross(arbitrary, z_axis)
+    x_axis = x_axis / np.linalg.norm(x_axis)
 
-    # Rotiere das Mesh
-    rotated_mesh = mesh.copy()
-    rotated_mesh.apply_transform(rotation_matrix)
+    # Y-Achse = z_axis × x_axis (ergibt orthonormales System)
+    y_axis = np.cross(z_axis, x_axis)
 
-    print(f"Mesh rotiert: Anschlussvektor {dir_vec} -> {target_direction}")
-    print(f"Rotationswinkel: {np.degrees(rotation_angle):.2f}°")
+    # Erstelle Rotationsmatrix (Spaltenvektoren sind die neuen Achsen)
+    # Dies ist die Basis-Transformation VOM lokalen Koordinatensystem ZUM Welt-System
+    # Wir brauchen die Inverse: VOM Welt-System ZUM lokalen System
+    rotation_matrix = np.column_stack([x_axis, y_axis, z_axis])
 
-    return rotated_mesh, rotation_matrix
+    # Die inverse Rotation (Weltkoordinaten -> lokales System)
+    # Bei orthonormalen Matrizen: inverse = transpose
+    rotation_inv = rotation_matrix.T
+
+    # Erstelle 4x4 Transformationsmatrix
+    # Erst Translation (verschiebe Anschlusspunkt zum Ursprung), dann Rotation
+    transformation = np.eye(4)
+    transformation[:3, :3] = rotation_inv
+    transformation[:3, 3] = -rotation_inv @ pos  # Verschiebe Position zum Ursprung
+
+    print(f"Transformation erstellt:")
+    print(f"  Z-Achse: {z_axis}")
+    print(f"  X-Achse: {x_axis}")
+    print(f"  Y-Achse: {y_axis}")
+    print(f"  Anschlusspunkt -> Ursprung: {pos} -> (0, 0, 0)")
+
+    return transformation
 
 
 def mesh_to_voxels(mesh, voxel_resolution=800):
@@ -753,27 +755,25 @@ def process_connection_point(json_file, connection_point_id=None):
         print(f"  Position: ({vector['position']['x']:.6f}, {vector['position']['y']:.6f}, {vector['position']['z']:.6f})")
         print(f"  Richtung: ({vector['direction']['x']:.6f}, {vector['direction']['y']:.6f}, {vector['direction']['z']:.6f})")
 
-        # 3. Rotiere Mesh so dass Anschlussvektor in Z-Richtung zeigt
-        rotated_mesh, rotation_matrix = rotate_mesh_to_align_vector(mesh, vector['direction'])
+        # 3. Erstelle Transformationsmatrix (Translation + Rotation)
+        # Anschlusspunkt -> Ursprung, Anschlussvektor -> Z-Achse
+        transformation_matrix = create_transformation_matrix(
+            vector['position'],
+            vector['direction']
+        )
 
-        # Rotiere auch den Anschlusspunkt
-        connection_point_world = np.array([
-            vector['position']['x'],
-            vector['position']['y'],
-            vector['position']['z'],
-            1.0
-        ])
-        rotated_connection_point = rotation_matrix @ connection_point_world
-        rotated_connection_dict = {
-            'x': rotated_connection_point[0],
-            'y': rotated_connection_point[1],
-            'z': rotated_connection_point[2]
-        }
+        # Wende Transformation auf Mesh an
+        transformed_mesh = mesh.copy()
+        transformed_mesh.apply_transform(transformation_matrix)
 
-        print(f"  Rotierter Anschlusspunkt: ({rotated_connection_dict['x']:.6f}, {rotated_connection_dict['y']:.6f}, {rotated_connection_dict['z']:.6f})")
+        # Nach Transformation: Anschlusspunkt ist bei (0, 0, 0)
+        rotated_connection_dict = {'x': 0.0, 'y': 0.0, 'z': 0.0}
+
+        print(f"  Transformierter Anschlusspunkt: (0.0, 0.0, 0.0)")
+        print(f"  Anschlussvektor ist jetzt: (0.0, 0.0, 1.0)")
 
         # 4. Konvertiere zu Voxeln
-        voxel_grid, voxel_size = mesh_to_voxels(rotated_mesh, voxel_resolution=800)
+        voxel_grid, voxel_size = mesh_to_voxels(transformed_mesh, voxel_resolution=800)
 
         # 5. Extrahiere als 3D Array
         voxel_array, bounds, grid_shape = extract_voxel_grid_as_3d_array(voxel_grid)
