@@ -448,13 +448,39 @@ plt.show()
 # %%
 def find_connection_point_2d(connection_point_3d, bounds, grid_shape):
     """Konvertiert 3D Anschlusspunkt zu 2D Koordinaten im Layer-Bild"""
-    x_min, x_max, y_min, y_max, z_min, z_max = bounds
-    x_normalized = (connection_point_3d['x'] - x_min) / (x_max - x_min)
-    y_normalized = (connection_point_3d['y'] - y_min) / (y_max - y_min)
+    # bounds format: (x_min, y_min, z_min, x_max, y_max, z_max)
+    x_min, y_min, z_min, x_max, y_max, z_max = bounds
+
+    # Handle connection point as dict or array
+    if isinstance(connection_point_3d, dict):
+        x = connection_point_3d['x']
+        y = connection_point_3d['y']
+    else:
+        x, y = connection_point_3d[0], connection_point_3d[1]
+
+    # Normalize to [0, 1]
+    x_range = x_max - x_min
+    y_range = y_max - y_min
+
+    if x_range == 0 or y_range == 0:
+        print(f"⚠ Warnung: Bounds haben keine Ausdehnung! x_range={x_range}, y_range={y_range}")
+        return (grid_shape[0] // 2, grid_shape[1] // 2)
+
+    x_normalized = (x - x_min) / x_range
+    y_normalized = (y - y_min) / y_range
+
+    # Convert to pixel coordinates
     x_2d = int(x_normalized * (grid_shape[0] - 1))
     y_2d = int(y_normalized * (grid_shape[1] - 1))
+
+    # Clamp to valid range
     x_2d = max(0, min(grid_shape[0] - 1, x_2d))
     y_2d = max(0, min(grid_shape[1] - 1, y_2d))
+
+    print(f"  3D Punkt: ({x:.4f}, {y:.4f}) → 2D Pixel: ({x_2d}, {y_2d})")
+    print(f"  Bounds: X=[{x_min:.4f}, {x_max:.4f}], Y=[{y_min:.4f}, {y_max:.4f}]")
+    print(f"  Grid Shape: {grid_shape}")
+
     return (x_2d, y_2d)
 
 def investigate_layer(voxel_array, z_level, boundary_image, connection_point_2d, verbose=False):
