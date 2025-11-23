@@ -549,24 +549,34 @@ def investigate_layer(voxel_array, z_level, boundary_image, connection_point_2d,
 
     cv2.floodFill(filled, mask, seed_point, 128, loDiff=0, upDiff=0,
                   flags=cv2.FLOODFILL_MASK_ONLY | (255 << 8))
-    filled_mask = mask[1:-1, 1:-1]
 
-    # Rand der gefüllten Region
+    # Rand der gefüllten Region - arbeite direkt auf mask (hat +2 Rand!)
+    # mask hat shape (h+2, w+2), die äußeren Pixel zeigen ob Flutung Bildrand erreicht hat
     kernel = np.ones((3, 3), np.uint8)
-    dilated_filled = cv2.dilate(filled_mask, kernel, iterations=1)
-    edge_mask = cv2.bitwise_and(dilated_filled, cv2.bitwise_not(filled_mask))
+    dilated_mask = cv2.dilate(mask, kernel, iterations=1)
+    edge_mask_with_border = cv2.bitwise_and(dilated_mask, cv2.bitwise_not(mask))
 
-    # Analyse: Kammer vs. Boundary
-    edge_pixels = edge_mask > 0
+    if verbose:
+        print(f"    edge_mask_with_border.shape = {edge_mask_with_border.shape}")
+        border_pixels = edge_mask_with_border[0,:].sum() + edge_mask_with_border[-1,:].sum() + edge_mask_with_border[:,0].sum() + edge_mask_with_border[:,-1].sum()
+        print(f"    Randpixel auf äußerem Rahmen: {border_pixels}")
+
+    # Analyse: Kammer vs. Boundary (auf edge_mask_with_border!)
+    edge_pixels = edge_mask_with_border > 0
     total_edge_pixels = edge_pixels.sum()
 
     if total_edge_pixels == 0:
         if verbose:
             print(f"  Layer {z_level}: Keine Randpixel gefunden")
         # Transponiere zurück zur ursprünglichen Orientierung
+        filled_mask = mask[1:-1, 1:-1]
         return False, 0.0, filled_mask.T
 
-    chamber_edge_pixels = cv2.bitwise_and(layer_image, edge_mask)
+    # Erweitere layer_image mit +2 Border (mit 0 gefüllt = kein Material)
+    # Damit können wir edge_mask_with_border direkt darauf anwenden
+    layer_image_padded = np.pad(layer_image, pad_width=1, mode='constant', constant_values=0)
+
+    chamber_edge_pixels = cv2.bitwise_and(layer_image_padded, edge_mask_with_border)
     chamber_count = (chamber_edge_pixels > 0).sum()
     chamber_percentage = (chamber_count / total_edge_pixels) * 100.0
     is_potential_opening = chamber_percentage > 50.0
@@ -578,9 +588,20 @@ def investigate_layer(voxel_array, z_level, boundary_image, connection_point_2d,
 
     # Transponiere filled_mask zurück zur ursprünglichen Orientierung
     # damit sie mit dem nicht-transponierten layer_image in der Visualisierung passt
+    filled_mask = mask[1:-1, 1:-1]
     filled_mask_original = filled_mask.T
 
-    return is_potential_opening, chamber_percentage, filled_mask_original
+    # Speichere Debug-Daten für optionale Visualisierung
+    debug_data = {
+        'layer_image': layer_image,  # Transponiert
+        'edge_mask_with_border': edge_mask_with_border,
+        'chamber_edge_pixels': chamber_edge_pixels,
+        'merged': merged,
+        'filled_mask': filled_mask,
+        'seed_point': seed_point
+    }
+
+    return is_potential_opening, chamber_percentage, filled_mask_original, debug_data
 
 def binary_search_opening(voxel_array, boundary_image, connection_point_2d,
                          z_start, z_end, verbose=True):
@@ -611,11 +632,11 @@ def binary_search_opening(voxel_array, boundary_image, connection_point_2d,
         if verbose:
             print(f"\nIteration {iteration}: Untersuche Layer {current_z} (Bereich: {lower}-{upper})")
 
-        is_opening, percentage, _ = investigate_layer(
+        is_opening, percentage, _, debug_data = investigate_layer(
             voxel_array, current_z, boundary_image, connection_point_2d, verbose=verbose
         )
 
-        investigated_layers.append((current_z, is_opening, percentage))
+        investigated_layers.append((current_z, is_opening, percentage, debug_data))
 
         if is_opening:
             last_opening_z = current_z
@@ -673,11 +694,11 @@ fig = plt.figure(figsize=(20, 10))
 # Zeile 1: Untersuchte Layers (max 8)
 display_count = min(8, n_layers)
 for i in range(display_count):
-    z_level, is_opening, percentage = investigated_layers_sorted[i]
+    z_level, is_opening, percentage, debug_data = investigated_layers_sorted[i]
     ax = plt.subplot(2, display_count, i + 1)
 
     layer_image = extract_2d_layer(voxel_array, z_level)
-    _, _, filled_mask = investigate_layer(voxel_array, z_level, boundary_image,
+    _, _, filled_mask, _ = investigate_layer(voxel_array, z_level, boundary_image,
                                          connection_point_2d, verbose=False)
 
     # Kombiniere Layer (grau) + FloodFill (rot)
@@ -735,7 +756,64 @@ fig.savefig(output_filename, dpi=150, bbox_inches='tight')
 print(f"\n✓ Binary Search Visualisierung gespeichert: {output_filename}")
 
 # %% [markdown]
-## 15. Zusammenfassung
+## 15. Detaillierte Layer-Visualisierung speichern
+
+# %%
+# Erstelle Unterordner für detaillierte Layer-Visualisierungen
+layers_debug_dir = os.path.join(output_dir, "layers_debug")
+os.makedirs(layers_debug_dir, exist_ok=True)
+
+print(f"\nSpeichere detaillierte Layer-Visualisierungen in: {layers_debug_dir}")
+
+for z_level, is_opening, percentage, debug_data in investigated_layers_sorted:
+    # Erstelle 2x2 Subplot für jedes Layer
+    fig, axes = plt.subplots(2, 2, figsize=(12, 12))
+    fig.suptitle(f"Layer {z_level} - {percentage:.1f}% Kammer - {'ÖFFNUNG' if is_opening else 'Geschlossen'}",
+                 fontsize=16, fontweight='bold', color='green' if is_opening else 'red')
+
+    # Panel 1: Original Layer + Boundary
+    layer_orig = extract_2d_layer(voxel_array, z_level)
+    merged_viz = cv2.bitwise_or(layer_orig, boundary_image)
+    axes[0, 0].imshow(merged_viz, cmap='gray', origin='lower')
+    axes[0, 0].set_title('Layer + Boundary (merged)')
+    axes[0, 0].plot(connection_point_2d[0], connection_point_2d[1], 'yo', markersize=10,
+                   markeredgecolor='black', markeredgewidth=2, label='Seed Point')
+    axes[0, 0].legend()
+    axes[0, 0].axis('off')
+
+    # Panel 2: Filled Region (FloodFill Ergebnis)
+    filled_display = debug_data['filled_mask'].copy()
+    axes[0, 1].imshow(filled_display, cmap='hot', origin='lower')
+    axes[0, 1].set_title('Filled Region (FloodFill)')
+    axes[0, 1].plot(connection_point_2d[0], connection_point_2d[1], 'yo', markersize=10,
+                   markeredgecolor='black', markeredgewidth=2)
+    axes[0, 1].axis('off')
+
+    # Panel 3: Edge Pixels (alle Randpixel)
+    edge_viz = debug_data['edge_mask_with_border'][1:-1, 1:-1].T  # Zurück transponieren
+    axes[1, 0].imshow(edge_viz, cmap='hot', origin='lower')
+    axes[1, 0].set_title(f'Edge Pixels (Total: {(edge_viz > 0).sum()})')
+    axes[1, 0].axis('off')
+
+    # Panel 4: Chamber Edge Pixels (nur Kammer-Randpixel)
+    chamber_edge_viz = debug_data['chamber_edge_pixels'][1:-1, 1:-1].T  # Zurück transponieren
+    axes[1, 1].imshow(chamber_edge_viz, cmap='hot', origin='lower')
+    axes[1, 1].set_title(f'Chamber Edge Pixels (Count: {(chamber_edge_viz > 0).sum()})')
+    axes[1, 1].axis('off')
+
+    plt.tight_layout()
+
+    # Speichere Bild
+    filename = os.path.join(layers_debug_dir, f"layer_{z_level:04d}_debug.png")
+    fig.savefig(filename, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+
+    print(f"  ✓ Layer {z_level} gespeichert")
+
+print(f"\n✓ {len(investigated_layers_sorted)} detaillierte Layer-Visualisierungen gespeichert")
+
+# %% [markdown]
+## 16. Zusammenfassung
 
 # %%
 print("="*60)
