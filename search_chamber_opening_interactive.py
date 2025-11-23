@@ -771,9 +771,10 @@ for z_level, is_opening, percentage, debug_data in investigated_layers_sorted:
     fig.suptitle(f"Layer {z_level} - {percentage:.1f}% Kammer - {'ÖFFNUNG' if is_opening else 'Geschlossen'}",
                  fontsize=16, fontweight='bold', color='green' if is_opening else 'red')
 
-    # Panel 1: Original Layer + Boundary
+    # Panel 1: Original Layer + Boundary (transponiert für korrekte Darstellung)
     layer_orig = extract_2d_layer(voxel_array, z_level)
-    merged_viz = cv2.bitwise_or(layer_orig, boundary_image)
+    boundary_orig = boundary_image
+    merged_viz = cv2.bitwise_or(layer_orig.T, boundary_orig.T)  # Transponieren für Visualisierung
     axes[0, 0].imshow(merged_viz, cmap='gray', origin='lower')
     axes[0, 0].set_title('Layer + Boundary (merged)')
     axes[0, 0].plot(connection_point_2d[0], connection_point_2d[1], 'yo', markersize=10,
@@ -781,22 +782,26 @@ for z_level, is_opening, percentage, debug_data in investigated_layers_sorted:
     axes[0, 0].legend()
     axes[0, 0].axis('off')
 
-    # Panel 2: Filled Region (FloodFill Ergebnis)
-    filled_display = debug_data['filled_mask'].copy()
+    # Panel 2: Filled Region (FloodFill Ergebnis) - transponiert für Visualisierung
+    # filled_mask wurde auf transponierten Bildern erstellt, zurück transponieren
+    filled_display = debug_data['filled_mask'].T.copy()
     axes[0, 1].imshow(filled_display, cmap='hot', origin='lower')
     axes[0, 1].set_title('Filled Region (FloodFill)')
-    axes[0, 1].plot(connection_point_2d[0], connection_point_2d[1], 'yo', markersize=10,
+    # seed_point: (x,y) wurde für transponierte Arrays verwendet
+    # Bei .T zurück muss auch seed_point vertauscht werden: (x,y) → (y,x)
+    seed_pt = debug_data['seed_point']
+    axes[0, 1].plot(seed_pt[1], seed_pt[0], 'yo', markersize=10,  # VERTAUSCHT!
                    markeredgecolor='black', markeredgewidth=2)
     axes[0, 1].axis('off')
 
-    # Panel 3: Edge Pixels (alle Randpixel)
-    edge_viz = debug_data['edge_mask_with_border'][1:-1, 1:-1].T  # Zurück transponieren
+    # Panel 3: Edge Pixels (alle Randpixel) - transponiert
+    edge_viz = debug_data['edge_mask_with_border'][1:-1, 1:-1].T
     axes[1, 0].imshow(edge_viz, cmap='hot', origin='lower')
     axes[1, 0].set_title(f'Edge Pixels (Total: {(edge_viz > 0).sum()})')
     axes[1, 0].axis('off')
 
-    # Panel 4: Chamber Edge Pixels (nur Kammer-Randpixel)
-    chamber_edge_viz = debug_data['chamber_edge_pixels'][1:-1, 1:-1].T  # Zurück transponieren
+    # Panel 4: Chamber Edge Pixels (nur Kammer-Randpixel) - transponiert
+    chamber_edge_viz = debug_data['chamber_edge_pixels'][1:-1, 1:-1].T
     axes[1, 1].imshow(chamber_edge_viz, cmap='hot', origin='lower')
     axes[1, 1].set_title(f'Chamber Edge Pixels (Count: {(chamber_edge_viz > 0).sum()})')
     axes[1, 1].axis('off')
