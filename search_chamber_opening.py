@@ -670,8 +670,9 @@ def visualize_binary_search_results(voxel_array, boundary_image, connection_poin
         if filled_mask is not None:
             display_image[filled_mask > 0] = [255, 100, 100]
 
-        # Markiere Anschlusspunkt
-        cv2.circle(display_image, connection_point_2d, 3, (0, 255, 0), -1)
+        # Markiere Öffnungspunkt (FloodFill Startpunkt) - großer gelber Kreis mit schwarzem Rand
+        cv2.circle(display_image, connection_point_2d, 8, (0, 0, 0), 2)  # Schwarzer Rand
+        cv2.circle(display_image, connection_point_2d, 6, (0, 255, 255), -1)  # Gelb gefüllt
 
         ax.imshow(display_image, origin='lower')
         title_color = 'green' if is_opening else 'red'
@@ -702,7 +703,12 @@ def visualize_binary_search_results(voxel_array, boundary_image, connection_poin
     ax_graph.grid(True, alpha=0.3)
     ax_graph.set_ylim([0, 105])
 
-    plt.tight_layout()
+    # Legende für Layer-Visualisierung
+    fig.text(0.5, 0.97,
+             'Legende: Gelber Punkt = Öffnungspunkt (FloodFill Start) | Rot = Gefüllte Kammer | Grau = Layer',
+             ha='center', fontsize=11, style='italic', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
 
     # Speichere Visualisierung
     output_filename = os.path.join(output_dir, f"{step_name}_binary_search_results.png")
