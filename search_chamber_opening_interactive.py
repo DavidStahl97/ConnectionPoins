@@ -785,7 +785,7 @@ for z_level, is_opening, percentage, debug_data in investigated_layers_sorted:
     # Panel 2: Filled Region (FloodFill Ergebnis) - transponiert für Visualisierung
     # filled_mask wurde auf transponierten Bildern erstellt, zurück transponieren
     filled_display = debug_data['filled_mask'].T.copy()
-    axes[0, 1].imshow(filled_display, cmap='hot', origin='lower')
+    axes[0, 1].imshow(filled_display, cmap='Reds', origin='lower', vmin=0, vmax=255)
     axes[0, 1].set_title('Filled Region (FloodFill)')
     # seed_point: (x,y) wurde für transponierte Arrays verwendet
     # Bei .T zurück muss auch seed_point vertauscht werden: (x,y) → (y,x)
@@ -796,13 +796,13 @@ for z_level, is_opening, percentage, debug_data in investigated_layers_sorted:
 
     # Panel 3: Edge Pixels (alle Randpixel) - transponiert
     edge_viz = debug_data['edge_mask_with_border'][1:-1, 1:-1].T
-    axes[1, 0].imshow(edge_viz, cmap='hot', origin='lower')
+    axes[1, 0].imshow(edge_viz, cmap='Reds', origin='lower', vmin=0, vmax=255)
     axes[1, 0].set_title(f'Edge Pixels (Total: {(edge_viz > 0).sum()})')
     axes[1, 0].axis('off')
 
     # Panel 4: Chamber Edge Pixels (nur Kammer-Randpixel) - transponiert
     chamber_edge_viz = debug_data['chamber_edge_pixels'][1:-1, 1:-1].T
-    axes[1, 1].imshow(chamber_edge_viz, cmap='hot', origin='lower')
+    axes[1, 1].imshow(chamber_edge_viz, cmap='Reds', origin='lower', vmin=0, vmax=255)
     axes[1, 1].set_title(f'Chamber Edge Pixels (Count: {(chamber_edge_viz > 0).sum()})')
     axes[1, 1].axis('off')
 
