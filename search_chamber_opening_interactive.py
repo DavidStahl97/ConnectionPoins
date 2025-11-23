@@ -576,7 +576,16 @@ def investigate_layer(voxel_array, z_level, boundary_image, connection_point_2d,
     # Damit können wir edge_mask_with_border direkt darauf anwenden
     layer_image_padded = np.pad(layer_image, pad_width=1, mode='constant', constant_values=0)
 
-    chamber_edge_pixels = cv2.bitwise_and(layer_image_padded, edge_mask_with_border)
+    # Dilatiere layer_image_padded um dickere Kammer-Wände zu haben
+    # So überlappt es besser mit edge_mask_with_border
+    kernel_chamber = np.ones((3, 3), np.uint8)
+    layer_image_dilated = cv2.dilate(layer_image_padded, kernel_chamber, iterations=1)
+
+    if verbose:
+        print(f"    layer_image_padded: {(layer_image_padded > 0).sum()} Pixel")
+        print(f"    layer_image_dilated: {(layer_image_dilated > 0).sum()} Pixel")
+
+    chamber_edge_pixels = cv2.bitwise_and(layer_image_dilated, edge_mask_with_border)
     chamber_count = (chamber_edge_pixels > 0).sum()
     chamber_percentage = (chamber_count / total_edge_pixels) * 100.0
     is_potential_opening = chamber_percentage > 50.0
@@ -594,6 +603,7 @@ def investigate_layer(voxel_array, z_level, boundary_image, connection_point_2d,
     # Speichere Debug-Daten für optionale Visualisierung
     debug_data = {
         'layer_image': layer_image,  # Transponiert
+        'layer_image_dilated': layer_image_dilated,  # Dilatiert für bessere Überlappung
         'edge_mask_with_border': edge_mask_with_border,
         'chamber_edge_pixels': chamber_edge_pixels,
         'merged': merged,
@@ -795,13 +805,13 @@ for z_level, is_opening, percentage, debug_data in investigated_layers_sorted:
     axes[0, 1].axis('off')
 
     # Panel 3: Edge Pixels (alle Randpixel) - transponiert
-    edge_viz = debug_data['edge_mask_with_border'][1:-1, 1:-1].T
+    edge_viz = debug_data['edge_mask_with_border'].T
     axes[1, 0].imshow(edge_viz, cmap='Reds', origin='lower', vmin=0, vmax=255)
     axes[1, 0].set_title(f'Edge Pixels (Total: {(edge_viz > 0).sum()})')
     axes[1, 0].axis('off')
 
     # Panel 4: Chamber Edge Pixels (nur Kammer-Randpixel) - transponiert
-    chamber_edge_viz = debug_data['chamber_edge_pixels'][1:-1, 1:-1].T
+    chamber_edge_viz = debug_data['chamber_edge_pixels'].T
     axes[1, 1].imshow(chamber_edge_viz, cmap='Reds', origin='lower', vmin=0, vmax=255)
     axes[1, 1].set_title(f'Chamber Edge Pixels (Count: {(chamber_edge_viz > 0).sum()})')
     axes[1, 1].axis('off')
